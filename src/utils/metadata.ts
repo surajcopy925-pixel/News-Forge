@@ -235,10 +235,13 @@ export const generateAllTimeSlots = (dateStr: string) => {
     const broadcastTime = `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
 
     slots.push({
+      rundownId: `RD-AUTO-${dateStr}-${String(hour24).padStart(2, '0')}${String(minute).padStart(2, '0')}`,
       id: `RD-AUTO-${dateStr}-${String(hour24).padStart(2, '0')}${String(minute).padStart(2, '0')}`,
       title: `${timeLabel} Bulletin`,
       airDate: dateStr,
+      date: dateStr,
       airTime: broadcastTime,
+      broadcastTime: broadcastTime,
       plannedDuration: '00:30:00',
       status: 'PLANNING' as const,
       entries: [],

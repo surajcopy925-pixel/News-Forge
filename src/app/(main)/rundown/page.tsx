@@ -1,1206 +1,702 @@
+// src/app/(main)/rundown/page.tsx
 'use client';
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { 
-  ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
-  Plus, Pencil, Trash2, Copy, ArrowUpDown, 
-  Printer, Search, Download, X,
-  FilePlus, FileSearch, GripVertical
-} from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNewsForgeStore } from '@/store/useNewsForgeStore';
-import { Story, Clip, Rundown, RundownEntry } from '@/types/newsforge';
-import { generateAllTimeSlots } from '@/utils/metadata';
+import { generateAllTimeSlots, parseToSeconds, formatSeconds } from '@/utils/metadata';
+import type { Story, StoryClip, RundownEntry } from '@/types/types';
 
-// ═══════════════════════════════════════════════════════
-// MOCK DATA & HELPERS
-// ═══════════════════════════════════════════════════════
+/* ── constants ── */
+interface SystemRow {
+  entryId: string;
+  rundownId: string;
+  storyId: string;
+  orderIndex: number;
+  scriptContent: string | null;
+  scriptSource: 'POLISHED' | 'RAW' | null;
+  isSystem: true;
+  slug: string;
+  format: string;
+  plannedDuration: string;
+}
 
-const MOCK_USERS = [
-  { userId: 'Admin', fullName: 'Administrator' },
-  { userId: 'Reporter1', fullName: 'Rahul Manju' },
-  { userId: 'Reporter2', fullName: 'Anita K' },
-  { userId: 'Producer1', fullName: 'Priya Sharma' },
-  { userId: 'SYSTEM', fullName: 'System' },
-];
+interface MergedEntry {
+  entryId: string;
+  rundownId: string;
+  storyId: string;
+  orderIndex: number;
+  scriptContent: string | null;
+  scriptSource: 'POLISHED' | 'RAW' | null;
+  isSystem: boolean;
+  slug: string;
+  format: string;
+  plannedDuration: string;
+  story?: Story;
+  clips?: StoryClip[];
+}
 
-const DEFAULT_SYSTEM_ENTRIES = [
-  { slug: 'HEADLINES', format: 'ANCHOR' as const, orderIndex: 0 },
-  { slug: 'START',     format: 'ANCHOR' as const, orderIndex: 1 },
-  { slug: 'BREAK 1',   format: 'BREAK' as const,  orderIndex: 2 },
-  { slug: 'BREAK 2',   format: 'BREAK' as const,  orderIndex: 3 },
-  { slug: 'END',       format: 'ANCHOR' as const,  orderIndex: 4 },
-];
+function buildSystemRows(rundownId: string): SystemRow[] {
+  return [
+    { entryId: `SYS-${rundownId}-HEADLINES`, rundownId, storyId: 'SYS-HEADLINES', orderIndex: 0, scriptContent: null, scriptSource: null, isSystem: true, slug: 'HEADLINES', format: 'ANCHOR', plannedDuration: '00:00:15' },
+    { entryId: `SYS-${rundownId}-START`, rundownId, storyId: 'SYS-START', orderIndex: 1, scriptContent: null, scriptSource: null, isSystem: true, slug: 'START', format: 'ANCHOR', plannedDuration: '00:00:15' },
+    { entryId: `SYS-${rundownId}-BREAK1`, rundownId, storyId: 'SYS-BREAK1', orderIndex: 100, scriptContent: null, scriptSource: null, isSystem: true, slug: 'BREAK 1', format: 'BREAK', plannedDuration: '00:05:00' },
+    { entryId: `SYS-${rundownId}-BREAK2`, rundownId, storyId: 'SYS-BREAK2', orderIndex: 200, scriptContent: null, scriptSource: null, isSystem: true, slug: 'BREAK 2', format: 'BREAK', plannedDuration: '00:05:00' },
+    { entryId: `SYS-${rundownId}-END`, rundownId, storyId: 'SYS-END', orderIndex: 999, scriptContent: null, scriptSource: null, isSystem: true, slug: 'END', format: 'ANCHOR', plannedDuration: '00:00:15' },
+  ];
+}
 
+function fmtBadge(f: string) {
+  switch (f) {
+    case 'ANCHOR': return 'bg-blue-600';
+    case 'PKG': return 'bg-purple-600';
+    case 'VO': return 'bg-teal-600';
+    case 'VO+BITE': return 'bg-cyan-600';
+    case 'LIVE': return 'bg-green-600';
+    case 'GFX': return 'bg-yellow-600';
+    case 'BREAK': return 'bg-red-600';
+    default: return 'bg-gray-600';
+  }
+}
 
-const formatDateDisplay = (dateStr: string) => {
-  const date = new Date(dateStr + 'T00:00:00');
-  const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-  const months = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
-                  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
-  return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]}`;
-};
+function statusColor(s: string) {
+  switch (s) {
+    case 'READY': case 'APPROVED': return 'text-green-400';
+    case 'EDITING': case 'DRAFT': return 'text-yellow-400';
+    case 'NOT READY': return 'text-red-400';
+    case 'SUBMITTED': return 'text-blue-400';
+    default: return 'text-gray-500';
+  }
+}
 
-// ═══════════════════════════════════════════════════════
-// COMPONENT
-// ═══════════════════════════════════════════════════════
+function fmtDur(d: string | null): string {
+  if (!d || d === '00:00:00') return '--:--';
+  const p = d.split(':');
+  if (p.length === 3 && p[0] === '00') return `${p[1]}:${p[2]}`;
+  return d;
+}
 
+/* ═══════════════════════ COMPONENT ═══════════════════════ */
 export default function RundownPage() {
-  const store = useNewsForgeStore();
-  const { 
-    rundowns, 
-    rundownEntries,
-    stories, 
-    clips: allClips, 
-    addStory, 
-    updateStory, 
-    addStoryToRundown, 
-    removeEntryFromRundown,
-    reorderRundownEntries,
-    updateRundown
-  } = store;
+  /* ── store ── */
+  const stories = useNewsForgeStore((s) => s.stories);
+  const storyClips = useNewsForgeStore((s) => s.storyClips);
+  const rundowns = useNewsForgeStore((s) => s.rundowns);
+  const rundownEntries = useNewsForgeStore((s) => s.rundownEntries);
+  const users = useNewsForgeStore((s) => s.users);
+  const createStory = useNewsForgeStore((s) => s.createStory);
+  const addEntryToRundown = useNewsForgeStore((s) => s.addEntryToRundown);
+  const removeEntryFromRundown = useNewsForgeStore((s) => s.removeEntryFromRundown);
+  const updateStoryField = useNewsForgeStore((s) => s.updateStoryField);
+  const reorderRundownEntries = useNewsForgeStore((s) => s.reorderRundownEntries);
 
-  // ─── STATE ───
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
-  });
+  /* ── state ── */
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedRundownId, setSelectedRundownId] = useState<string | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
-  
-  const [detailPanelHeight, setDetailPanelHeight] = useState(280);
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [activeDetailTab, setActiveDetailTab] = useState('SCRIPT');
-  
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<'SCRIPT' | 'CLIPS' | 'CG'>('SCRIPT');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [splitPct, setSplitPct] = useState(55);
   const [showNewMenu, setShowNewMenu] = useState(false);
-  const [showNewStoryForm, setShowNewStoryForm] = useState(false);
-  const [showExistingPicker, setShowExistingPicker] = useState(false);
-  const [storySearchQuery, setStorySearchQuery] = useState('');
-  const [bulletinSearch, setBulletinSearch] = useState('');
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addSearch, setAddSearch] = useState('');
 
-  // Form states - ALL EMPTY
-  const [newTitle, setNewTitle] = useState('');
-  const [newSlug, setNewSlug] = useState('');
-  const [newFormat, setNewFormat] = useState('');
-  const [newContent, setNewContent] = useState('');
-  const [newPlannedDuration, setNewPlannedDuration] = useState('');
+  /* ── create form ── */
+  const [nTitle, setNTitle] = useState('');
+  const [nSlug, setNSlug] = useState('');
+  const [nFormat, setNFormat] = useState<Story['format']>('');
+  const [nDur, setNDur] = useState('00:00:00');
+  const [nContent, setNContent] = useState('');
 
-  // Detail panel field states (synced with selected entry)
-  const [editorialNotes, setEditorialNotes] = useState('');
-  const [anchorScript, setAnchorScript] = useState('');
-  const [voScript, setVoScript] = useState('');
+  /* ── detail editing ── */
+  const [eAnchor, setEAnchor] = useState('');
+  const [eVO, setEVO] = useState('');
+  const [eNotes, setENotes] = useState('');
 
-  // ─── DATA HOOKS ───
+  /* ── drag ── */
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
+  /* ── refs ── */
+  const splitRef = useRef(false);
+
+  /* ═══════ 1. ALL RUNDOWNS ═══════ */
   const allRundowns = useMemo(() => {
-    // Generate all 48 time slots for selected date
-    const autoSlots = generateAllTimeSlots(selectedDate);
-    const existingForDate = rundowns.filter((r) => r.airDate === selectedDate);
-
-    // Merge: if an existing rundown matches a time slot, use the existing one
-    const merged = autoSlots.map((slot) => {
-      const existing = existingForDate.find(
-        (r) => r.airTime === slot.airTime
-      );
-      return existing || (slot as Rundown);
+    const auto = generateAllTimeSlots(selectedDate);
+    const fromStore = rundowns.filter((r) => r.date === selectedDate);
+    const merged = auto.map((slot) => {
+      const ex = fromStore.find((r) => r.rundownId === slot.rundownId);
+      return ex ? { ...slot, ...ex } : slot;
     });
-
-    // Add any existing rundowns that DON'T match a standard time slot
-    existingForDate.forEach((existing) => {
-      const alreadyMerged = merged.find((m) => m.id === existing.id);
-      if (!alreadyMerged) {
-        merged.push(existing);
-      }
+    fromStore.forEach((sr) => {
+      if (!merged.find((m) => m.rundownId === sr.rundownId)) merged.push(sr as any);
     });
-
-    // Sort by broadcast time
-    merged.sort((a, b) => a.airTime.localeCompare(b.airTime));
-
     return merged;
   }, [selectedDate, rundowns]);
 
+  /* ═══════ 2. FILTERED ═══════ */
   const filteredRundowns = useMemo(() => {
-    if (!bulletinSearch.trim()) return allRundowns;
-    const query = bulletinSearch.toLowerCase().trim();
-    return allRundowns.filter((rd) =>
-      rd.title.toLowerCase().includes(query) ||
-      rd.airTime.includes(query)
-    );
-  }, [allRundowns, bulletinSearch]);
+    if (!searchQuery.trim()) return allRundowns;
+    const q = searchQuery.toLowerCase();
+    return allRundowns.filter((r) => r.title.toLowerCase().includes(q) || r.broadcastTime.includes(q));
+  }, [allRundowns, searchQuery]);
 
+  /* ═══════ 3. SELECTED RUNDOWN ═══════ */
   const selectedRundown = useMemo(() => {
-    return allRundowns.find(r => r.id === selectedRundownId) || null;
-  }, [selectedRundownId, allRundowns]);
+    return selectedRundownId ? allRundowns.find((r) => r.rundownId === selectedRundownId) || null : null;
+  }, [allRundowns, selectedRundownId]);
 
-  const entriesForRundown = useMemo(() => {
+  /* ═══════ 4. ENTRIES ═══════ */
+  const entriesForRundown: MergedEntry[] = useMemo(() => {
     if (!selectedRundownId) return [];
+    const sys = buildSystemRows(selectedRundownId);
+    const storeE = rundownEntries.filter((e) => e.rundownId === selectedRundownId);
 
-    const DEFAULT_SYSTEM = [
-      { slug: 'HEADLINES', format: 'ANCHOR' as const, dur: '00:00:15' },
-      { slug: 'START', format: 'ANCHOR' as const, dur: '00:00:15' },
-      { slug: 'BREAK 1', format: 'BREAK' as const, dur: '00:05:00' },
-      { slug: 'BREAK 2', format: 'BREAK' as const, dur: '00:05:00' },
-      { slug: 'END', format: 'ANCHOR' as const, dur: '00:00:15' },
-    ];
-
-    // Get ACTUAL entries from store for this rundown
-    const storeEntries = rundownEntries
-      .filter((e) => e.rundownId === selectedRundownId)
-      .sort((a, b) => a.orderIndex - b.orderIndex);
-
-    // Build system rows
-    const systemRows = DEFAULT_SYSTEM.map((sys, i) => ({
-      entryId: `SYS-${selectedRundownId}-${sys.slug.replace(/\s/g, '')}`,
-      rundownId: selectedRundownId,
-      storyId: `SYS-${sys.slug.replace(/\s/g, '-')}`,
-      orderIndex: i,
-      scriptContent: null,
-      scriptSource: null as any,
-      _title: sys.slug,
-      _format: sys.format,
-      _isSystem: true,
-      _status: '' as any,
-      _plannedDuration: sys.dur,
-      _clips: [] as any[],
-      _story: null as any,
-      _createdBy: 'SYSTEM',
-    }));
-
-    // Build story rows from actual entries
-    const storyRows = storeEntries.map((entry) => {
-      const story = stories.find((s) => s.id === entry.storyId);
-      const clips = allClips.filter((c) => c.storyId === entry.storyId);
+    const storyE: MergedEntry[] = storeE.map((entry) => {
+      const story = stories.find((s) => s.storyId === entry.storyId);
+      const clips = storyClips.filter((c) => c.storyId === entry.storyId);
       return {
         ...entry,
-        _title: story?.title || story?.slug || 'Untitled',
-        _format: story?.format || '',
-        _isSystem: false,
-        _status: story?.status || '',
-        _plannedDuration: story?.plannedDuration || '00:00:00',
-        _clips: clips,
-        _story: story || null,
-        _createdBy: story?.createdBy || '—',
+        isSystem: false,
+        slug: story?.slug || story?.title || 'Untitled',
+        format: story?.format || '',
+        plannedDuration: story?.plannedDuration || '00:00:00',
+        story,
+        clips,
       };
     });
 
-    // Combine: HEADLINES, START, [stories], BREAK 1, BREAK 2, END
-    const combined = [
-      systemRows[0],   // HEADLINES
-      systemRows[1],   // START
-      ...storyRows,    // Sent stories go HERE
-      systemRows[2],   // BREAK 1
-      systemRows[3],   // BREAK 2
-      systemRows[4],   // END
-    ];
+    const all: MergedEntry[] = [sys[0], sys[1], ...storyE, sys[2], sys[3], sys[4]];
+    return all.map((e, i) => ({ ...e, orderIndex: i }));
+  }, [selectedRundownId, rundownEntries, stories, storyClips]);
 
-    return combined.map((entry, idx) => ({ ...entry, orderIndex: idx }));
-  }, [selectedRundownId, rundownEntries, stories, allClips]);
+  /* ═══════ 5. TIMING ═══════ */
+  const storySec = useMemo(() => entriesForRundown.filter((e) => e.format !== 'BREAK').reduce((s, e) => s + parseToSeconds(e.plannedDuration), 0), [entriesForRundown]);
+  const breakSec = useMemo(() => entriesForRundown.filter((e) => e.format === 'BREAK').reduce((s, e) => s + parseToSeconds(e.plannedDuration), 0), [entriesForRundown]);
+  const totalSec = storySec + breakSec;
+  const plannedSec = parseToSeconds(selectedRundown?.plannedDuration || '00:30:00');
+  const overUnder = totalSec - plannedSec;
 
-  const selectedEntry = useMemo(() => {
-    return entriesForRundown.find((e) => e.entryId === selectedEntryId) || null;
-  }, [selectedEntryId, entriesForRundown]);
+  /* ═══════ 6. SELECTED ENTRY ═══════ */
+  const selectedEntry = useMemo(() => selectedEntryId ? entriesForRundown.find((e) => e.entryId === selectedEntryId) || null : null, [entriesForRundown, selectedEntryId]);
 
-  // Auto-select the nearest bulletin to current time on page load
+  /* ═══════ 7. AUTO-SELECT ═══════ */
   useEffect(() => {
-    if (selectedRundownId) return; // Don't override manual selection
     if (allRundowns.length === 0) return;
-
     const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const mins = now.getHours() * 60 + now.getMinutes();
+    let best = allRundowns[0];
+    let bestD = Infinity;
+    allRundowns.forEach((r) => {
+      const p = r.broadcastTime.split(':').map(Number);
+      const d = Math.abs(p[0] * 60 + (p[1] || 0) - mins);
+      if (d < bestD) { bestD = d; best = r; }
+    });
+    setSelectedRundownId(best.rundownId);
+  }, [allRundowns]);
 
-    // Find the nearest bulletin that is AT or BEFORE current time
-    let nearest = allRundowns[0];
-    let smallestDiff = Infinity;
-
-    for (const rd of allRundowns) {
-      const parts = rd.airTime.split(':').map(Number);
-      const rdMinutes = parts[0] * 60 + parts[1];
-      const diff = currentMinutes - rdMinutes;
-
-      if (diff >= 0 && diff < smallestDiff) {
-        smallestDiff = diff;
-        nearest = rd;
-      }
-    }
-
-    if (smallestDiff === Infinity) {
-      nearest = allRundowns[0];
-    }
-
-    setSelectedRundownId(nearest.id);
-
-    // Also scroll the sidebar to show the selected bulletin
-    setTimeout(() => {
-      const element = document.getElementById(`bulletin-${nearest.id}`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 100);
-  }, [allRundowns, selectedRundownId]);
-
-  // ─── CALCULATION HOOKS ───
-
-  const storiesTotalDuration = useMemo(() => {
-    const totalSec = entriesForRundown.reduce((acc, entry) => {
-      if (entry._format === 'BREAK') return acc;
-      const parts = entry._plannedDuration.split(':').map(Number);
-      return acc + (parts[0] * 3600 + parts[1] * 60 + parts[2]);
-    }, 0);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }, [entriesForRundown]);
-
-  const breaksTotalDuration = useMemo(() => {
-    const totalSec = entriesForRundown.reduce((acc, entry) => {
-      if (entry._format !== 'BREAK') return acc;
-      const parts = entry._plannedDuration.split(':').map(Number);
-      return acc + (parts[0] * 3600 + parts[1] * 60 + parts[2]);
-    }, 0);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }, [entriesForRundown]);
-
-  const grandTotalSec = useMemo(() => {
-    const sParts = storiesTotalDuration.split(':').map(Number);
-    const bParts = breaksTotalDuration.split(':').map(Number);
-    return (sParts[0] * 3600 + sParts[1] * 60 + sParts[2]) + (bParts[0] * 3600 + bParts[1] * 60 + bParts[2]);
-  }, [storiesTotalDuration, breaksTotalDuration]);
-
-  const grandTotalDuration = useMemo(() => {
-    const h = Math.floor(grandTotalSec / 3600);
-    const m = Math.floor((grandTotalSec % 3600) / 60);
-    const s = grandTotalSec % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }, [grandTotalSec]);
-
-  const overUnderSec = useMemo(() => {
-    const plannedParts = (selectedRundown?.plannedDuration || '00:30:00').split(':').map(Number);
-    const plannedSec = (plannedParts[0] * 3600 + plannedParts[1] * 60 + plannedParts[2]);
-    return plannedSec - grandTotalSec;
-  }, [selectedRundown, grandTotalSec]);
-
-  const overUnderDisplay = useMemo(() => {
-    const absSec = Math.abs(overUnderSec);
-    const h = Math.floor(absSec / 3600);
-    const m = Math.floor((absSec % 3600) / 60);
-    const s = absSec % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }, [overUnderSec]);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const detailContentRef = useRef<HTMLDivElement>(null);
-
-  // ─── HELPERS ───
-  
-
-  const navigateDate = (direction: 'prev' | 'next') => {
-    const current = new Date(selectedDate + 'T00:00:00');
-    current.setDate(current.getDate() + (direction === 'next' ? 1 : -1));
-    setSelectedDate(current.toISOString().split('T')[0]);
-    setSelectedRundownId(null);
-    setIsDetailOpen(false);
-  };
-
-  const goToToday = () => {
-    setSelectedDate(new Date().toISOString().split('T')[0]);
-    setSelectedRundownId(null);
-    setIsDetailOpen(false);
-  };
-
-  const resetNewForm = () => {
-    setNewTitle('');
-    setNewSlug('');
-    setNewFormat('');
-    setNewContent('');
-    setNewPlannedDuration('');
-  };
-
-  // ─── MEMOS ───
-
-
-  const availableStories = useMemo(() => {
-    const entriesInRundown = entriesForRundown
-      .filter(e => !e._isSystem)
-      .map((e) => e.storyId);
-    
-    return stories.filter((s) => 
-      !s.id.startsWith('SYS-') && 
-      s.createdBy !== 'SYSTEM' &&
-      !entriesInRundown.includes(s.id) &&
-      (storySearchQuery === '' || 
-       s.title.toLowerCase().includes(storySearchQuery.toLowerCase()) ||
-       s.slug.toLowerCase().includes(storySearchQuery.toLowerCase()))
-    );
-  }, [stories, entriesForRundown, storySearchQuery]);
-
-  // ─── EFFECTS ───
-
-  // Sync state when selection changes
+  /* ═══════ 8. LOAD DETAIL DATA ═══════ */
   useEffect(() => {
-    if (selectedEntry) {
-      const story = selectedEntry._story;
-      setEditorialNotes(story?.notes || '');
-      setAnchorScript(story?.anchorScript || '');
-      setVoScript(story?.voiceoverScript || '');
+    if (selectedEntry && !selectedEntry.isSystem && selectedEntry.story) {
+      const st = selectedEntry.story;
+      setEAnchor(st.anchorScript || selectedEntry.scriptContent || st.polishedScript || st.rawScript || st.content || '');
+      setEVO(st.voiceoverScript || '');
+      setENotes(st.editorialNotes || '');
+    } else {
+      setEAnchor(''); setEVO(''); setENotes('');
     }
   }, [selectedEntry]);
 
-  // ─── HANDLERS ───
+  /* ═══════ HANDLERS ═══════ */
+  const chgDate = (d: number) => {
+    const dt = new Date(selectedDate); dt.setDate(dt.getDate() + d);
+    setSelectedDate(dt.toISOString().split('T')[0]);
+    setSelectedRundownId(null); setSelectedEntryId(null); setDetailOpen(false);
+  };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    
-    const startY = e.clientY;
-    const startHeight = detailPanelHeight;
-    
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const delta = startY - moveEvent.clientY;
-      const newHeight = Math.max(150, Math.min(600, startHeight + delta));
-      setDetailPanelHeight(newHeight);
+  const selectRd = (id: string) => { setSelectedRundownId(id); setSelectedEntryId(null); setDetailOpen(false); };
+
+  const clickRow = (e: MergedEntry) => { setSelectedEntryId(e.entryId); setDetailOpen(true); setDetailTab('SCRIPT'); };
+
+  const saveChanges = () => {
+    if (!selectedEntry || selectedEntry.isSystem || !selectedEntry.story) return;
+    const sid = selectedEntry.story.storyId;
+    updateStoryField(sid, 'anchorScript', eAnchor);
+    updateStoryField(sid, 'voiceoverScript', eVO);
+    updateStoryField(sid, 'editorialNotes', eNotes);
+  };
+
+  const removeEntry = (id: string, sys: boolean) => {
+    if (sys) return;
+    removeEntryFromRundown(id);
+    if (selectedEntryId === id) { setSelectedEntryId(null); setDetailOpen(false); }
+  };
+
+  const scrollEntry = (dir: 'up' | 'down') => {
+    if (!selectedEntryId) return;
+    const i = entriesForRundown.findIndex((e) => e.entryId === selectedEntryId);
+    const n = dir === 'up' ? i - 1 : i + 1;
+    if (n >= 0 && n < entriesForRundown.length) setSelectedEntryId(entriesForRundown[n].entryId);
+  };
+
+  /* ── drag ── */
+  const onDragStart = (i: number) => setDragIdx(i);
+  const onDragOver = (e: React.DragEvent, i: number) => { e.preventDefault(); setDragOverIdx(i); };
+  const onDragEnd = () => {
+    if (dragIdx !== null && dragOverIdx !== null && dragIdx !== dragOverIdx && selectedRundownId) {
+      reorderRundownEntries(selectedRundownId, dragIdx, dragOverIdx);
+    }
+    setDragIdx(null);
+    setDragOverIdx(null);
+  };
+
+  /* ── split resize ── */
+  useEffect(() => {
+    const mv = (e: MouseEvent) => {
+      if (!splitRef.current) return;
+      const c = document.getElementById('rd-main');
+      if (!c) return;
+      const r = c.getBoundingClientRect();
+      setSplitPct(Math.min(80, Math.max(25, ((e.clientY - r.top) / r.height) * 100)));
     };
-    
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-    
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  };
+    const up = () => { splitRef.current = false; };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+  }, []);
 
-  const scrollDetail = (direction: 'up' | 'down') => {
-    if (detailContentRef.current) {
-      const amount = direction === 'up' ? -100 : 100;
-      detailContentRef.current.scrollBy({ top: amount, behavior: 'smooth' });
-    }
-  };
-
-  const handleDragStart = (index: number) => {
-    setDragIndex(index);
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    setDragOverIndex(index);
-  };
-
-  const handleDragEnd = () => {
-    if (dragIndex !== null && dragOverIndex !== null && dragIndex !== dragOverIndex && selectedRundownId) {
-      // For store entries, use the reorder action
-      // However, since we combine system rows and story rows, we need to find the correct indices in storyRows
-      // Actually, Fix 2 Step A reorderRundownEntries handles the rundownEntries state.
-      // If we assume system rows are NOT in the store, this action will only reorder STORIES.
-      // But the user requested "Rundown rows (HEADLINES, START, stories, BREAKs, END) need drag-to-reorder".
-      // This implies we should be able to reorder EVERYTHING.
-      
-      reorderRundownEntries(selectedRundownId, dragIndex, dragOverIndex);
-    }
-    setDragIndex(null);
-    setDragOverIndex(null);
-  };
-
-  const handleRowClick = (entryId: string) => {
-    setSelectedEntryId(entryId);
-    setIsDetailOpen(true);
-  };
-
-  const handleSaveDetail = () => {
-    if (!selectedEntry) return;
-
-    let storyId = selectedEntry.storyId;
-
-    // If it's a virtual system row, create the story and add to rundown if needed
-    if (selectedEntry._isSystem && selectedEntry.entryId.startsWith('SYS-')) {
-      // Find if system story already exists
-      let existingSystemStory = stories.find(s => s.id === selectedEntry.storyId || s.slug === selectedEntry._title);
-      
-      if (!existingSystemStory) {
-        storyId = addStory({
-          title: selectedEntry._title,
-          slug: selectedEntry._title,
-          format: selectedEntry._format,
-          notes: editorialNotes,
-          anchorScript: anchorScript,
-          voiceoverScript: voScript,
-          status: 'READY',
-          createdBy: 'SYSTEM'
-        });
-      } else {
-        storyId = existingSystemStory.id;
-        updateStory(storyId, {
-          notes: editorialNotes,
-          anchorScript: anchorScript,
-          voiceoverScript: voScript
-        });
-      }
-
-      // Initialize rundown with defaults if empty
-      const currentRundown = rundowns.find(r => r.id === selectedRundownId);
-      if (!currentRundown || currentRundown.entries.length === 0) {
-        // Add all 5 defaults
-        DEFAULT_SYSTEM_ENTRIES.forEach(sys => {
-          let sId = `SYS-${sys.slug.replace(/\s/g, '-').toUpperCase()}`;
-          // Check if we just created this one
-          if (sys.slug === selectedEntry._title) {
-            addStoryToRundown(selectedRundownId!, storyId);
-          } else {
-            const existing = stories.find(s => s.id === sId || s.slug === sys.slug);
-            if (existing) {
-              addStoryToRundown(selectedRundownId!, existing.id);
-            } else {
-              const newId = addStory({
-                title: sys.slug,
-                slug: sys.slug,
-                format: sys.format,
-                createdBy: 'SYSTEM',
-                status: 'READY'
-              });
-              addStoryToRundown(selectedRundownId!, newId);
-            }
-          }
-        });
-      }
-    } else {
-      // Regular story update
-      updateStory(storyId, {
-        notes: editorialNotes,
-        anchorScript: anchorScript,
-        voiceoverScript: voScript
-      });
-    }
-  };
-
-  const createStoryInRundown = (data: any) => {
-    const id = addStory({
-      title: data.title,
-      slug: data.slug,
-      format: data.format,
-      content: data.content,
-      plannedDuration: data.plannedDuration,
-      status: 'DRAFT',
-      createdBy: 'Admin' // Should be current user
+  /* ── create empty ── */
+  const createEmpty = () => {
+    if (!selectedRundownId || !nTitle.trim()) return;
+    const sid = `STY-${Date.now()}`;
+    const now = new Date().toISOString();
+    createStory({
+      storyId: sid, id: sid, title: nTitle, slug: nSlug || nTitle.toUpperCase().replace(/\s+/g, '_').slice(0, 20),
+      category: 'General', location: 'Newsroom', date: selectedDate, source: 'Internal',
+      format: nFormat || '', status: 'DRAFT', content: nContent, rawScript: nContent,
+      polishedScript: null, anchorScript: '', voiceoverScript: '', editorialNotes: '', notes: '',
+      priority: 'normal', scriptSentToRundown: null, sentToRundownId: selectedRundownId, sentToRundownAt: now, sentBy: 'USR-001',
+      polishedBy: null, polishedAt: null, isPolished: false,
+      createdBy: 'USR-001', createdAt: now, updatedAt: now,
+      plannedDuration: nDur, rundownId: selectedRundownId, orderIndex: 0, assignedTo: null,
     });
-    addStoryToRundown(data.rundownId, id);
+    addEntryToRundown(selectedRundownId, sid);
+    setNTitle(''); setNSlug(''); setNFormat(''); setNDur('00:00:00'); setNContent('');
+    setShowCreateModal(false);
   };
 
-  // ─── RENDER ───
+  /* ── add existing ── */
+  const existingStories = useMemo(() => {
+    const inRd = new Set(entriesForRundown.filter((e) => !e.isSystem).map((e) => e.storyId));
+    return stories.filter((s) => !s.storyId.startsWith('SYS-') && !inRd.has(s.storyId));
+  }, [stories, entriesForRundown]);
 
+  const filteredExisting = useMemo(() => {
+    if (!addSearch.trim()) return existingStories;
+    const q = addSearch.toLowerCase();
+    return existingStories.filter((s) => s.title.toLowerCase().includes(q) || s.slug.toLowerCase().includes(q));
+  }, [existingStories, addSearch]);
+
+  const addExisting = (sid: string) => {
+    if (!selectedRundownId) return;
+    addEntryToRundown(selectedRundownId, sid);
+    setShowAddModal(false); setAddSearch('');
+  };
+
+  /* ── helpers ── */
+  const storyCount = (rdId: string) => rundownEntries.filter((e) => e.rundownId === rdId && !e.storyId.startsWith('SYS-')).length;
+
+  const clipCell = (e: MergedEntry) => {
+    if (e.isSystem) return <span className="text-gray-600">—</span>;
+    const c = e.clips || [];
+    if (c.length === 0) return <span className="text-gray-600">—</span>;
+    const done = c.filter((x) => x.status === 'COMPLETED' || x.status === 'APPROVED').length;
+    if (done === c.length) return <span className="text-green-400">{c.length} ✓</span>;
+    return <span className="text-amber-400">{done}/{c.length} *</span>;
+  };
+
+  const durCell = (e: MergedEntry) => {
+    if (e.isSystem) return <span className="text-gray-600">—</span>;
+    const c = e.clips || [];
+    if (c.length > 0) {
+      const t = c.reduce((s, x) => s + parseToSeconds(x.duration), 0);
+      if (t > 0) return <span className="text-green-400">{formatSeconds(t)}</span>;
+    }
+    const p = e.story?.plannedDuration || e.plannedDuration;
+    if (p && p !== '00:00:00') return <span className="text-yellow-400">{p}</span>;
+    return <span className="text-gray-600">00:00:00</span>;
+  };
+
+  const tvCell = (e: MergedEntry) => {
+    if (e.isSystem) return <span className="text-gray-600">—</span>;
+    const tTime = e.story?.plannedDuration || '00:00:00';
+    const c = e.clips || [];
+    const vSec = c.reduce((s, x) => s + parseToSeconds(x.duration), 0);
+    return (
+      <span className="text-[10px] leading-tight">
+        <span className="block">T {fmtDur(tTime)}</span>
+        <span className="block">V {vSec > 0 ? fmtDur(formatSeconds(vSec)) : '--:--'}</span>
+      </span>
+    );
+  };
+
+  const userName = (uid: string | undefined) => {
+    if (!uid) return '—';
+    const u = users.find((x) => x.userId === uid);
+    return u ? u.fullName.split(' ').map((w) => w[0]).join('') : uid.slice(0, 6);
+  };
+
+  /* ═══════════════════════════ RENDER ═══════════════════════════ */
   return (
-    <div className="flex bg-[#0a0f1a] text-slate-200 h-[calc(100vh-64px)] overflow-hidden font-sans">
-      
-      {/* ═══ LEFT SIDEBAR ═══ */}
-      <div className="w-56 flex-shrink-0 bg-[#0c1118] border-r border-[#1e293b] flex flex-col h-full">
-        {/* Header */}
-        <div className="p-3 border-b border-[#1e293b]">
-          <h2 className="text-[10px] font-bold text-gray-400 tracking-widest uppercase">
-            Rundowns
-          </h2>
-        </div>
-        
-        {/* Date Navigation */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-[#1e293b]">
-          <button onClick={() => navigateDate('prev')} className="text-gray-400 hover:text-white p-1">
-            <ChevronLeft size={14} />
-          </button>
-          <span className="text-xs text-white font-medium uppercase">
-            {formatDateDisplay(selectedDate)}
-          </span>
-          <button onClick={() => navigateDate('next')} className="text-gray-400 hover:text-white p-1">
-            <ChevronRight size={14} />
-          </button>
-        </div>
-        
-        {/* TODAY button */}
-        <div className="px-3 py-1.5 border-b border-[#1e293b]">
-          <button onClick={goToToday} className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-3 py-1 rounded">
-            TODAY
-          </button>
-        </div>
-
-        {/* ═══ SEARCH BOX ═══ */}
-        <div className="px-2 py-2 border-b border-[#1e293b]">
-          <div className="relative">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              value={bulletinSearch}
-              onChange={(e) => setBulletinSearch(e.target.value)}
-              placeholder="Search bulletins..."
-              className="w-full bg-[#0a0f1a] border border-[#1e293b] rounded pl-7 pr-2 py-1.5 text-[10px] text-white placeholder:text-gray-600 focus:outline-none focus:border-blue-500/50"
-            />
-            {bulletinSearch && (
-              <button
-                onClick={() => setBulletinSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
-              >
-                <X size={10} />
-              </button>
-            )}
+    <div className="flex h-[calc(100vh-56px)] bg-[#0a0e17] text-gray-200 text-xs">
+      {/* ══════ SIDEBAR ══════ */}
+      <div className="w-[185px] min-w-[185px] border-r border-gray-800/60 flex flex-col bg-[#0d1117]">
+        <div className="px-2 pt-2 pb-1.5 border-b border-gray-800/60">
+          <div className="text-[10px] font-bold text-gray-500 tracking-wider mb-1">RUNDOWNS</div>
+          <div className="flex items-center justify-between mb-1.5">
+            <button onClick={() => chgDate(-1)} className="text-gray-500 hover:text-white text-sm px-0.5">&lt;</button>
+            <span className="text-[11px] font-bold tracking-wide">
+              {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase()}
+            </span>
+            <button onClick={() => chgDate(1)} className="text-gray-500 hover:text-white text-sm px-0.5">&gt;</button>
           </div>
-          {bulletinSearch && (
-            <div className="text-[9px] text-gray-500 mt-1 px-1">
-              {filteredRundowns.length} of {allRundowns.length} bulletins
-            </div>
-          )}
+          <button onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])} className="w-full bg-green-600 hover:bg-green-700 text-[10px] font-bold py-0.5 rounded mb-1.5">TODAY</button>
+          <input
+            type="text" placeholder="Search bulletins..." value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-gray-800/60 border border-gray-700/50 rounded px-1.5 py-[3px] text-[10px] text-gray-400 placeholder-gray-600"
+          />
         </div>
-        
-        {/* ═══ SCROLLABLE BULLETIN LIST ═══ */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 overflow-y-auto">
           {filteredRundowns.map((rd) => {
-            const entryCount = rundowns.find(r => r.id === rd.id)?.entries.length || 0;
-            const isSelected = selectedRundownId === rd.id;
-            const hasContent = entryCount > 0 || rd.status !== 'PLANNING';
-            
+            const sel = rd.rundownId === selectedRundownId;
+            const sc = storyCount(rd.rundownId);
             return (
               <div
-                key={rd.id}
-                id={`bulletin-${rd.id}`}
-                onClick={() => setSelectedRundownId(rd.id)}
-                className={`cursor-pointer p-3 border-b border-[#1e293b]/50 transition-colors
-                  ${isSelected 
-                    ? 'bg-blue-900/10 border-l-2 border-l-blue-500' 
-                    : 'hover:bg-[#1e293b]/30 border-l-2 border-l-transparent'
-                  }
-                  ${!hasContent ? 'opacity-50' : ''}
-                `}
+                key={rd.rundownId} onClick={() => selectRd(rd.rundownId)}
+                className={`px-2 py-1.5 cursor-pointer border-b border-gray-800/40 transition-colors ${sel ? 'bg-blue-900/30 border-l-[3px] border-l-blue-500' : 'hover:bg-gray-800/30 border-l-[3px] border-l-transparent'}`}
               >
-                {/* Title */}
-                <div className="text-sm text-white font-medium">{rd.title}</div>
-                
-                {/* Time + Duration */}
-                <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
-                  <span className="text-red-400 font-mono italic">RD</span>
-                  <span className="font-mono">{rd.airTime.slice(0, 5)}</span>
-                  <span>⏱</span>
-                  <span className="font-mono">{rd.plannedDuration}</span>
+                <div className="font-semibold text-[11px] truncate leading-tight">{rd.title}</div>
+                <div className="flex items-center gap-1.5 text-[9px] text-gray-500 mt-0.5">
+                  <span className="text-blue-400 font-bold">RD</span>
+                  <span>{rd.broadcastTime.slice(0, 5)}</span>
+                  <span className="text-gray-700">●</span>
+                  <span>{rd.plannedDuration}</span>
                 </div>
-                
-                {/* Story count */}
-                <div className="flex items-center gap-2 mt-1.5">
-                  <span className="text-[10px] text-gray-300 font-bold uppercase">
-                    {entryCount || 5} STORIES
-                  </span>
+                <div className="flex items-center justify-between mt-0.5 text-[9px]">
+                  <span className="text-gray-500">{5 + sc} STORIES</span>
+                  <span className="text-gray-600">MOS OK</span>
                 </div>
-                
-                {/* Status + MOS */}
-                <div className="mt-1.5 flex items-center justify-between">
-                  <span className={`text-[10px] font-bold tracking-wider ${
-                    rd.status === 'READY' ? 'text-green-400' :
-                    rd.status === 'LIVE' ? 'text-red-400' :
-                    rd.status === 'PLANNING' ? 'text-amber-400' :
-                    'text-gray-400'
-                  }`}>
-                    ● {rd.status}
-                  </span>
-                  <span className="text-[9px] text-gray-600 font-bold">MOS: OK</span>
-                </div>
+                <span className={`text-[9px] ${rd.status === 'READY' ? 'text-green-400' : rd.status === 'LIVE' ? 'text-red-400' : 'text-yellow-500'}`}>● {rd.status}</span>
               </div>
             );
           })}
-
-          {filteredRundowns.length === 0 && (
-            <div className="p-4 text-center text-gray-600 text-[10px]">
-              No bulletins match "{bulletinSearch}"
-            </div>
-          )}
         </div>
       </div>
 
-      {/* ═══ MAIN CONTENT AREA ═══ */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden" ref={containerRef}>
-        
-        {/* ACTION BAR */}
-        <div className="flex items-center gap-1 px-3 py-2 border-b border-[#1e293b] bg-[#0c1118]">
+      {/* ══════ MAIN ══════ */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* action bar */}
+        <div className="flex items-center gap-1 px-3 py-1 border-b border-gray-800/60 bg-[#0d1117]">
           <div className="relative">
-            <button 
-              onClick={() => setShowNewMenu(!showNewMenu)}
-              className="flex items-center gap-1 text-[10px] text-green-400 hover:text-green-300 font-bold uppercase tracking-wider px-2 py-1"
-            >
-              <Plus size={10} /> New
-            </button>
+            <button onClick={() => setShowNewMenu(!showNewMenu)} className="bg-green-600 hover:bg-green-700 text-white text-[10px] font-bold px-2.5 py-1 rounded">+ NEW</button>
             {showNewMenu && (
-              <div className="absolute top-full left-0 mt-1 bg-[#1e293b] border border-[#334155] rounded-lg shadow-2xl z-50 w-56 overflow-hidden">
-                <button
-                  onClick={() => { resetNewForm(); setShowNewStoryForm(true); setShowNewMenu(false); }}
-                  className="w-full text-left px-4 py-3 text-sm text-white hover:bg-slate-700 border-b border-[#334155]/50 flex items-center gap-3"
-                >
-                  <FilePlus size={14} className="text-green-400" />
-                  <div>
-                    <div className="font-medium text-xs">Create Empty Story</div>
-                    <div className="text-[9px] text-gray-400 mt-0.5 uppercase tracking-tighter">New story with blank fields</div>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setShowExistingPicker(true); setShowNewMenu(false); }}
-                  className="w-full text-left px-4 py-3 text-sm text-white hover:bg-slate-700 flex items-center gap-3"
-                >
-                  <FileSearch size={14} className="text-blue-400" />
-                  <div>
-                    <div className="font-medium text-xs">Add Existing Story</div>
-                    <div className="text-[9px] text-gray-400 mt-0.5 uppercase tracking-tighter">Pick from stories in system</div>
-                  </div>
-                </button>
+              <div className="absolute top-full left-0 mt-0.5 bg-gray-800 border border-gray-700 rounded shadow-xl z-50 w-40">
+                <button onClick={() => { setShowCreateModal(true); setShowNewMenu(false); }} className="w-full text-left px-2.5 py-1.5 text-[10px] hover:bg-gray-700">Create Empty Story</button>
+                <button onClick={() => { setShowAddModal(true); setShowNewMenu(false); }} className="w-full text-left px-2.5 py-1.5 text-[10px] hover:bg-gray-700">Add Existing Story</button>
               </div>
             )}
           </div>
-          
-          <span className="text-gray-700 mx-1">|</span>
-          <button className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-white uppercase font-bold tracking-wider px-2 py-1">
-            <Pencil size={10} /> Edit
-          </button>
-          <button className="flex items-center gap-1 text-[10px] text-red-500 hover:text-red-400 uppercase font-bold tracking-wider px-2 py-1">
-            <Trash2 size={10} /> Delete
-          </button>
-          <span className="text-gray-700 mx-1">|</span>
-          <button className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-white uppercase font-bold tracking-wider px-2 py-1">
-            <Copy size={10} /> Copy
-          </button>
-          <button className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-white uppercase font-bold tracking-wider px-2 py-1">
-            <ArrowUpDown size={10} /> Move
-          </button>
-          <span className="text-gray-700 mx-1">|</span>
-          <button className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-white uppercase font-bold tracking-wider px-2 py-1">
-            <Printer size={10} /> Print
-          </button>
-          <button className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-white uppercase font-bold tracking-wider px-2 py-1">
-            <Search size={10} /> Search
-          </button>
-          <button className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-white uppercase font-bold tracking-wider px-2 py-1">
-            <Download size={10} /> Export
-          </button>
+          {['✏ EDIT', '⊘ DELETE', '⎘ COPY', '↕ MOVE', '🖨 PRINT', '🔍 SEARCH', '📤 EXPORT'].map((l) => (
+            <button key={l} className="text-gray-500 hover:text-gray-300 text-[10px] px-1.5 py-1">{l}</button>
+          ))}
           <div className="flex-1" />
-          <button className="flex items-center gap-1.5 text-[10px] bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded font-bold transition-colors">
-            RUN LIVE
-          </button>
+          <button className="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-3 py-1 rounded">RUN LIVE</button>
         </div>
 
-        {/* INFO BAR */}
+        {/* info bar */}
         {selectedRundown && (
-          <div className="flex items-center gap-10 px-5 py-2.5 bg-[#0a0f1a] border-b border-[#1e293b]">
-            <div className="min-w-[150px]">
-              <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Rundown</div>
-              <div className="text-xs text-white font-bold">{selectedRundown.title}</div>
-            </div>
-            <div>
-              <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Status</div>
-              <span className="bg-green-600 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase">READY</span>
-            </div>
-            <div>
-              <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Duration</div>
-              <div className="text-xs text-white font-mono font-bold">00:30:00</div>
-            </div>
-            <div>
-              <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Planned</div>
-              <span className="bg-cyan-700 text-white text-[11px] font-mono font-bold px-2.5 py-0.5 rounded uppercase tracking-tighter">
-                {selectedRundown.plannedDuration}
-              </span>
-            </div>
-            <div className="ml-auto flex items-center gap-3">
-              <div className="text-right">
-                <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">MOS Connection</div>
-                <div className="text-[10px] text-green-400 font-bold">● ONLINE</div>
-              </div>
-            </div>
+          <div className="flex items-center gap-5 px-3 py-1.5 border-b border-gray-800/60 text-[10px]">
+            <div><span className="text-gray-500 block text-[9px]">RUNDOWN</span><span className="font-bold text-[11px]">{selectedRundown.title}</span></div>
+            <div><span className="text-gray-500 block text-[9px]">STATUS</span><span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${selectedRundown.status === 'READY' ? 'bg-green-600' : selectedRundown.status === 'LIVE' ? 'bg-red-600' : 'bg-yellow-600'}`}>{selectedRundown.status}</span></div>
+            <div><span className="text-gray-500 block text-[9px]">DURATION</span><span className="font-mono font-bold text-[11px]">{formatSeconds(totalSec)}</span></div>
+            <div><span className="text-gray-500 block text-[9px]">PLANNED</span><span className="font-mono bg-red-600/20 text-red-400 px-1.5 py-0.5 rounded text-[9px]">{selectedRundown.plannedDuration}</span></div>
+            <div className="flex-1" />
+            <div className="text-right"><span className="text-gray-500 block text-[9px]">MOS CONNECTION</span><span className="text-green-400 text-[9px]">● ONLINE</span></div>
           </div>
         )}
 
-        {/* ═══ TABLE AREA ═══ */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto custom-scrollbar" style={{ 
-            maxHeight: isDetailOpen ? `calc(100% - ${detailPanelHeight + 8}px)` : '100%' 
-          }}>
-            <div className="sticky top-0 z-10 bg-[#0a0f1a] border-b border-[#1e293b]">
-              <div className="grid grid-cols-[40px_30px_30px_1fr_90px_70px_50px_80px_90px_80px_90px_80px_30px] gap-0 px-2 py-2 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                <span>#</span>
-                <span>↕</span>
-                <span></span>
-                <span>Slugs / Headline</span>
-                <span className="text-center">Format</span>
-                <span className="text-center">Clips</span>
-                <span className="text-center">CG</span>
-                <span className="text-center">Dur</span>
-                <span className="text-center">Text/Vid</span>
-                <span className="text-center">Planned</span>
-                <span className="text-center">Author</span>
-                <span className="text-center">Status</span>
-                <span></span>
-              </div>
-            </div>
-            
-            {entriesForRundown.map((entry, idx) => (
-              <div
-                key={entry.entryId}
-                draggable
-                onDragStart={() => handleDragStart(idx)}
-                onDragOver={(e) => handleDragOver(e, idx)}
-                onDragEnd={handleDragEnd}
-                onDrop={handleDragEnd}
-                onClick={() => handleRowClick(entry.entryId)}
-                className={`grid grid-cols-[40px_30px_30px_1fr_90px_70px_50px_80px_90px_80px_90px_80px_30px] gap-0 px-2 py-2.5 border-b border-nf-border/30 cursor-pointer transition-all text-sm ${
-                  selectedEntryId === entry.entryId ? 'bg-nf-surface' : 'hover:bg-nf-surface/30'
-                } ${dragIndex === idx ? 'opacity-40' : ''} ${
-                  dragOverIndex === idx ? 'border-t-2 border-t-blue-500' : ''
-                } ${entry._isSystem ? 'text-gray-400' : 'text-white'}`}
-              >
-                {/* # */}
-                <span className="text-gray-500 text-xs font-mono">{idx}</span>
+        {/* table + detail */}
+        <div id="rd-main" className="flex-1 flex flex-col min-h-0">
+          {/* TABLE */}
+          <div style={{ height: detailOpen ? `${splitPct}%` : '100%' }} className="overflow-auto">
+            <table className="w-full">
+              <thead className="bg-[#0d1117] sticky top-0 z-10">
+                <tr className="text-gray-500 text-[9px] tracking-wider border-b border-gray-800/60">
+                  <th className="py-1 px-1.5 w-6 text-center">#</th>
+                  <th className="py-1 px-0.5 w-4"></th>
+                  <th className="py-1 px-0.5 w-4"></th>
+                  <th className="py-1 px-2 text-left">SLUGS / HEADLINE</th>
+                  <th className="py-1 px-1 text-center w-16">FORMAT</th>
+                  <th className="py-1 px-1 text-center w-12">CLIPS</th>
+                  <th className="py-1 px-1 text-center w-8">CG</th>
+                  <th className="py-1 px-1 text-center w-[70px]">DUR</th>
+                  <th className="py-1 px-1 text-center w-[60px]">TEXT/VID</th>
+                  <th className="py-1 px-1 text-center w-[70px]">PLANNED</th>
+                  <th className="py-1 px-1 text-center w-[65px]">AUTHOR</th>
+                  <th className="py-1 px-1 text-center w-[70px]">STATUS</th>
+                  <th className="py-1 px-0.5 w-5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {entriesForRundown.map((e, idx) => {
+                  const isSel = e.entryId === selectedEntryId;
+                  const isDO = dragOverIdx === idx;
+                  return (
+                    <tr
+                      key={e.entryId} draggable
+                      onDragStart={() => onDragStart(idx)}
+                      onDragOver={(ev) => onDragOver(ev, idx)}
+                      onDragEnd={onDragEnd}
+                      onClick={() => clickRow(e)}
+                      className={`border-b border-gray-800/30 cursor-pointer transition-colors ${isSel ? 'bg-blue-900/20' : 'hover:bg-gray-800/20'} ${isDO ? 'border-t-2 border-t-blue-500' : ''}`}
+                    >
+                      <td className="py-[5px] px-1.5 text-center text-gray-600 text-[10px]">{idx}</td>
+                      <td className="py-[5px] px-0.5 text-center text-gray-700 cursor-grab text-[10px]">⠿</td>
+                      <td className="py-[5px] px-0.5 text-center">
+                        <span className={`inline-block w-2 h-2 rounded-full ${e.isSystem ? 'bg-red-500' : e.story?.status === 'READY' ? 'bg-green-500' : e.story?.status === 'EDITING' ? 'bg-yellow-500' : 'bg-orange-500'}`} />
+                      </td>
+                      <td className="py-[5px] px-2 font-semibold text-[11px] truncate max-w-[280px]">
+                        {e.isSystem ? e.slug : (e.story?.title || e.slug)}
+                      </td>
+                      <td className="py-[5px] px-1 text-center">
+                        <span className={`text-[9px] font-bold px-1.5 py-[1px] rounded ${fmtBadge(e.format || e.story?.format || '')}`}>
+                          {e.format || e.story?.format || '—'}
+                        </span>
+                      </td>
+                      <td className="py-[5px] px-1 text-center text-[10px]">{clipCell(e)}</td>
+                      <td className="py-[5px] px-1 text-center text-gray-600 text-[10px]">—</td>
+                      <td className="py-[5px] px-1 text-center font-mono text-[10px]">{e.isSystem ? <span className="text-gray-600">—</span> : durCell(e)}</td>
+                      <td className="py-[5px] px-1 text-center">{tvCell(e)}</td>
+                      <td className="py-[5px] px-1 text-center font-mono text-[10px] text-gray-400">
+                        {e.isSystem ? e.plannedDuration : (e.story?.plannedDuration || e.plannedDuration || '—')}
+                      </td>
+                      <td className="py-[5px] px-1 text-center text-[10px] text-gray-500 truncate">
+                        {e.isSystem ? 'SYSTEM' : userName(e.story?.createdBy)}
+                      </td>
+                      <td className="py-[5px] px-1 text-center text-[10px]">
+                        {e.isSystem ? <span className="text-gray-600">SYSTEM</span> : <span className={statusColor(e.story?.status || '')}>{e.story?.status || '—'}</span>}
+                      </td>
+                      <td className="py-[5px] px-0.5 text-center">
+                        {!e.isSystem && (
+                          <button onClick={(ev) => { ev.stopPropagation(); removeEntry(e.entryId, e.isSystem); }} className="text-gray-700 hover:text-red-400 text-[10px]">✕</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
 
-                {/* Drag handle */}
-                <span className="text-gray-600 cursor-grab active:cursor-grabbing flex items-center">
-                  <GripVertical size={12} />
-                </span>
-
-                {/* Status dot */}
-                <span className="flex items-center">
-                  {entry._isSystem && (
-                    <span className="inline-block w-2 h-2 rounded-full bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]" />
-                  )}
-                </span>
-
-                {/* Title/Slug */}
-                <span className={`font-medium truncate pr-4 ${entry._isSystem ? 'text-gray-400 uppercase tracking-widest text-[11px]' : 'text-slate-200'}`}
-                      style={entry._title.match(/[^\x00-\x7F]/) ? { fontFamily: "'Noto Sans Kannada', sans-serif" } : {}}>
-                  {entry._title}
-                </span>
-
-                {/* Format */}
-                <span className="flex justify-center">
-                  <span className={`text-[9px] px-2 py-0.5 rounded font-bold tracking-widest border border-current ${
-                    entry._format === 'ANCHOR' ? 'text-gray-400' :
-                    entry._format === 'PKG' ? 'text-blue-400 border-blue-400/30 bg-blue-400/5' :
-                    entry._format === 'VO+BITE' ? 'text-teal-400 border-teal-400/30 bg-teal-400/5' :
-                    entry._format === 'VO' ? 'text-purple-400 border-purple-400/30 bg-purple-400/5' :
-                    entry._format === 'BREAK' ? 'text-orange-400 border-orange-400/30 bg-orange-400/5' :
-                    'text-gray-600'
-                  }`}>
-                    {entry._format || '—'}
-                  </span>
-                </span>
-
-                {/* Clips */}
-                <span className="text-center text-blue-400 text-xs font-bold">
-                  {entry._clips && entry._clips.length > 0 ? (
-                    <div className="flex items-center justify-center gap-1">
-                      <span>{entry._clips.length}</span>
-                      {entry._clips.some((c: any) => c.status !== 'COMPLETED' && c.status !== 'APPROVED') ? (
-                        <span className="text-amber-400">*</span>
-                      ) : (
-                        <span className="text-green-400 text-[10px]">✓</span>
-                      )}
-                    </div>
-                  ) : '—'}
-                </span>
-
-                {/* CG */}
-                <span className="text-center text-gray-700">—</span>
-
-                {/* Duration */}
-                <span className="text-center text-emerald-400 font-mono text-xs uppercase">
-                  {entry._isSystem ? '—' : '00:00:00'}
-                </span>
-
-                {/* Text/Vid */}
-                <span className="text-[9px] text-gray-500 font-mono text-center leading-tight">
-                  {entry._isSystem ? '—' : (
-                    <div>
-                      <div>T 00:00:00</div>
-                      <div>V 00:00:00</div>
-                    </div>
-                  )}
-                </span>
-
-                {/* Planned */}
-                <span className="text-center text-gray-500 font-mono text-xs italic">
-                  {entry._plannedDuration}
-                </span>
-
-                {/* Author */}
-                <span className="text-center text-[10px] text-gray-600 uppercase tracking-tighter truncate px-2 font-medium">
-                  {entry._createdBy === 'SYSTEM' ? 'SYSTEM' : (() => {
-                    const user = MOCK_USERS.find((u: any) => u.userId === entry._createdBy);
-                    return user?.fullName?.split(' ')[0] || entry._createdBy || '—';
-                  })()}
-                </span>
-
-                {/* Status */}
-                <span className={`text-[10px] font-bold text-center tracking-widest uppercase ${
-                  entry._status === 'READY' ? 'text-green-400' :
-                  entry._status === 'EDITING' ? 'text-blue-400' :
-                  entry._status === 'SUBMITTED' ? 'text-amber-400' :
-                  'text-gray-600'
-                }`}>
-                  {entry._isSystem ? '' : entry._status}
-                </span>
-
-                {/* Delete */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (!entry._isSystem && selectedRundownId) {
-                      removeEntryFromRundown(entry.entryId);
-                    }
-                  }}
-                  className={`text-gray-700 hover:text-red-500 transition-colors ${entry._isSystem ? 'opacity-30 cursor-not-allowed' : ''}`}
-                  disabled={entry._isSystem}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
-
-            {/* Drop zone at the bottom */}
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDragOverIndex(entriesForRundown.length); }}
-              onDrop={handleDragEnd}
-              className={`h-8 ${dragOverIndex === entriesForRundown.length ? 'border-t-2 border-t-blue-500 bg-blue-500/5' : ''}`}
-            />
-          </div>
-
-          {/* TIMING FOOTER */}
-          <div className="flex items-center justify-between px-5 py-2.5 bg-[#0f1420] border-t border-[#1e293b] text-xs z-10">
-            <div className="flex items-center gap-8">
-              <span className="text-gray-500 font-medium uppercase tracking-widest">
-                STORIES: <span className="text-white font-mono font-bold ml-1">{storiesTotalDuration}</span>
-              </span>
-              <span className="text-gray-500 font-medium uppercase tracking-widest">
-                BREAKS: <span className="text-orange-400 font-mono font-bold ml-1">{breaksTotalDuration}</span>
-              </span>
-              <div className="w-px h-3 bg-[#334155] mx-1" />
-              <span className="text-gray-500 font-medium uppercase tracking-widest">
-                TOTAL: <span className="text-white font-mono font-bold ml-1">{grandTotalDuration}</span>
-              </span>
-            </div>
-            <div className="flex items-center gap-8">
-              <span className="text-gray-500 font-medium uppercase tracking-widest flex items-center gap-3">
-                PLANNED: <span className="bg-amber-600/20 text-amber-500 px-3 py-0.5 rounded-full font-mono font-bold border border-amber-500/20">{selectedRundown?.plannedDuration || '00:30:00'}</span>
-              </span>
-              <span className="text-gray-500 font-medium uppercase tracking-widest flex items-center gap-2">
-                OVER/UNDER: <span className={`font-mono font-bold ${overUnderSec >= 0 ? 'text-green-400' : 'text-red-500'}`}>{overUnderSec < 0 ? '+' : ''}{overUnderDisplay}</span> <span className="text-base">{overUnderSec >= 0 ? '✅' : '⚠️'}</span>
-              </span>
+            {/* timing footer */}
+            <div className="flex items-center gap-4 px-3 py-1.5 border-t border-gray-800/60 bg-[#0d1117] text-[10px] font-mono">
+              <span>STORIES: <strong className="text-white">{formatSeconds(storySec)}</strong></span>
+              <span>BREAKS: <strong className="text-red-400">{formatSeconds(breakSec)}</strong></span>
+              <span className="text-gray-700">|</span>
+              <span>TOTAL: <strong className="text-white">{formatSeconds(totalSec)}</strong></span>
+              <div className="flex-1" />
+              <span>PLANNED: <span className="bg-red-600/20 text-red-400 px-1.5 py-0.5 rounded">{selectedRundown?.plannedDuration || '00:30:00'}</span></span>
+              <span>OVER/UNDER: <strong className={overUnder > 0 ? 'text-red-400' : 'text-green-400'}>{overUnder > 0 ? '+' : ''}{formatSeconds(overUnder)}</strong> {overUnder <= 0 ? '✅' : '❌'}</span>
             </div>
           </div>
 
-          {/* RESIZE HANDLE */}
-          {isDetailOpen && (
-            <div
-              onMouseDown={handleMouseDown}
-              className={`h-1.5 bg-[#1e293b] cursor-row-resize flex items-center justify-center
-                          hover:bg-blue-500/50 transition-colors z-30
-                          ${isDragging ? 'bg-blue-500' : ''}`}
-            >
-              <div className="w-12 h-0.5 bg-gray-600 rounded-full" />
+          {/* resize handle */}
+          {detailOpen && (
+            <div onMouseDown={() => { splitRef.current = true; }} className="h-1.5 bg-gray-800/60 hover:bg-blue-600 cursor-row-resize flex items-center justify-center">
+              <div className="w-10 h-[2px] bg-gray-600 rounded" />
             </div>
           )}
 
-          {/* DETAIL PANEL */}
-          {isDetailOpen && selectedEntry && (
-            <div 
-              className="bg-[#0c1118] border-t border-[#1e293b] flex flex-col z-20 shadow-2xl"
-              style={{ height: `${detailPanelHeight}px`, minHeight: '150px' }}
-            >
-              <div className="flex items-center justify-between px-5 py-2.5 border-b border-[#1e293b] bg-[#0f1420]">
-                <div className="flex gap-6">
-                  {['SCRIPT', 'CLIPS', 'CG GRAPHICS'].map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveDetailTab(tab)}
-                      className={`text-[10px] font-bold tracking-widest pb-1 border-b-2 transition-colors uppercase ${
-                        activeDetailTab === tab 
-                          ? 'text-blue-400 border-blue-400' 
-                          : 'text-gray-500 border-transparent hover:text-gray-300'
-                      }`}
-                    >
-                      {tab}
-                    </button>
-                  ))}
+          {/* ══════ DETAIL PANEL ══════ */}
+          {detailOpen && selectedEntry && (
+            <div style={{ height: `${100 - splitPct}%` }} className="border-t border-gray-700/50 bg-[#0d1117] flex flex-col min-h-0">
+              {/* header */}
+              <div className="flex items-center px-3 py-1 border-b border-gray-800/60">
+                <div className="flex gap-3">
+                  {(['SCRIPT', 'CLIPS', 'CG GRAPHICS'] as const).map((tab) => {
+                    const k = tab === 'CG GRAPHICS' ? 'CG' : tab;
+                    return (
+                      <button key={tab} onClick={() => setDetailTab(k as any)}
+                        className={`text-[10px] font-bold pb-0.5 ${detailTab === k ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500 hover:text-gray-300'}`}>
+                        {tab}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mr-4">
-                    Editing: <span className="text-white">"{selectedEntry._title}"</span>
-                  </span>
-                  
-                  <div className="flex items-center bg-[#1e293b] rounded p-0.5">
-                    <button onClick={() => scrollDetail('up')} className="text-gray-500 hover:text-white p-1 rounded hover:bg-[#334155]">
-                      <ChevronUp size={14} />
-                    </button>
-                    <button onClick={() => scrollDetail('down')} className="text-gray-500 hover:text-white p-1 rounded hover:bg-[#334155]">
-                      <ChevronDown size={14} />
-                    </button>
-                  </div>
-
-                  <button 
-                    onClick={handleSaveDetail}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-4 py-1.5 rounded-sm transition-all"
-                  >
-                    SAVE CHANGES
-                  </button>
-
-                  <button onClick={() => { setIsDetailOpen(false); setSelectedEntryId(null); }} className="text-gray-500 hover:text-white p-1">
-                    <X size={16} />
-                  </button>
-                </div>
+                <div className="flex-1" />
+                <span className="text-[10px] text-gray-500">EDITING: <strong className="text-white">&quot;{selectedEntry.isSystem ? selectedEntry.slug : (selectedEntry.story?.title || selectedEntry.slug)}&quot;</strong></span>
+                <button onClick={() => scrollEntry('up')} className="ml-3 text-gray-500 hover:text-white text-[10px] px-0.5">▲</button>
+                <button onClick={() => scrollEntry('down')} className="text-gray-500 hover:text-white text-[10px] px-0.5">▼</button>
+                <button onClick={saveChanges} className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-bold px-3 py-[3px] rounded">SAVE CHANGES</button>
+                <button onClick={() => { setDetailOpen(false); setSelectedEntryId(null); }} className="ml-1.5 text-gray-500 hover:text-white text-sm">✕</button>
               </div>
-              
-              <div ref={detailContentRef} className="flex-1 overflow-y-auto custom-scrollbar p-5">
-                {activeDetailTab === 'SCRIPT' && (
-                  <div className="flex gap-6 h-full min-h-[300px]">
-                    <div className="w-[30%] flex flex-col border-r border-[#1e293b] pr-6">
-                      <h4 className="text-[10px] text-gray-500 font-bold mb-3 uppercase tracking-widest">Editorial Notes</h4>
+
+              {/* body */}
+              <div className="flex-1 overflow-auto p-2.5">
+                {detailTab === 'SCRIPT' && (
+                  <div className="flex gap-3 h-full">
+                    {/* left: notes */}
+                    <div className="w-[38%] flex flex-col">
+                      <div className="text-[9px] font-bold text-gray-500 tracking-wider mb-1">EDITORIAL NOTES</div>
                       <textarea
-                        value={editorialNotes}
-                        onChange={(e) => setEditorialNotes(e.target.value)}
+                        value={eNotes} onChange={(e) => setENotes(e.target.value)}
                         placeholder="Add production notes here..."
-                        className={`flex-1 bg-[#0a0f1a] border border-[#1e293b] rounded p-4 text-xs text-gray-300 resize-none
-                                   focus:outline-none focus:border-blue-500/50 transition-colors
-                                   placeholder:text-gray-700 leading-relaxed`}
+                        className="flex-1 bg-gray-800/40 border border-gray-700/40 rounded px-2 py-1.5 text-[11px] text-gray-300 resize-none"
+                        style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
                       />
                     </div>
-                    
-                    <div className="flex-1 flex flex-col gap-5">
-                      <div className="flex flex-col flex-1">
-                        <h4 className="text-[10px] font-bold mb-3 uppercase tracking-widest flex items-center gap-2">
-                          <span className="text-red-500">●</span>
-                          <span className="text-red-500">Anchor Script</span>
-                        </h4>
+                    {/* right: anchor + vo */}
+                    <div className="w-[62%] flex flex-col gap-2.5">
+                      <div className="flex-1 flex flex-col">
+                        <div className="text-[9px] font-bold mb-1">
+                          <span className="text-red-500">●</span>{' '}
+                          <span className="text-red-400">ANCHOR SCRIPT</span>
+                          {selectedEntry.scriptContent && (
+                            <span className="ml-1.5 text-gray-600 font-normal">({selectedEntry.scriptSource || 'RAW'})</span>
+                          )}
+                        </div>
                         <textarea
-                          value={anchorScript}
-                          onChange={(e) => setAnchorScript(e.target.value)}
+                          value={eAnchor} onChange={(e) => setEAnchor(e.target.value)}
                           placeholder="Type anchor script here..."
-                          className={`flex-1 min-h-[120px] bg-[#0a0f1a] border border-[#1e293b] rounded p-4 text-[15px] text-white resize-none
-                                     focus:outline-none focus:border-blue-500/50 transition-colors
-                                     placeholder:text-gray-700 leading-relaxed font-medium`}
-                          style={anchorScript.match(/[^\x00-\x7F]/) ? { fontFamily: "'Noto Sans Kannada', sans-serif" } : {}}
+                          className="flex-1 bg-gray-800/40 border border-gray-700/40 rounded px-2 py-1.5 text-[11px] text-gray-300 resize-none whitespace-pre-wrap"
+                          style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', minHeight: '80px' }}
                         />
                       </div>
-                      <div className="flex flex-col flex-1">
-                        <h4 className="text-[10px] font-bold mb-3 uppercase tracking-widest flex items-center gap-2">
-                          <span className="text-orange-400">●</span>
-                          <span className="text-orange-400">Voiceover / PKG Script</span>
-                        </h4>
+                      <div className="flex-1 flex flex-col">
+                        <div className="text-[9px] font-bold mb-1">
+                          <span className="text-yellow-500">●</span>{' '}
+                          <span className="text-yellow-400">VOICEOVER / PKG SCRIPT</span>
+                        </div>
                         <textarea
-                          value={voScript}
-                          onChange={(e) => setVoScript(e.target.value)}
+                          value={eVO} onChange={(e) => setEVO(e.target.value)}
                           placeholder="Type voiceover script here..."
-                          className={`flex-1 min-h-[120px] bg-[#0a0f1a] border border-[#1e293b] rounded p-4 text-sm text-gray-300 resize-none
-                                     focus:outline-none focus:border-blue-500/50 transition-colors
-                                     placeholder:text-gray-700 leading-relaxed italic`}
-                          style={voScript.match(/[^\x00-\x7F]/) ? { fontFamily: "'Noto Sans Kannada', sans-serif" } : {}}
+                          className="flex-1 bg-gray-800/40 border border-gray-700/40 rounded px-2 py-1.5 text-[11px] text-gray-300 resize-none whitespace-pre-wrap"
+                          style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', minHeight: '80px' }}
                         />
                       </div>
                     </div>
                   </div>
                 )}
-                
-                {activeDetailTab === 'CLIPS' && (
-                  <div className="grid grid-cols-2 gap-4">
-                    {selectedEntry._clips && selectedEntry._clips.length > 0 ? (
-                      selectedEntry._clips.map((clip: any) => (
-                        <div key={clip.id} className="flex items-center gap-4 p-4 bg-[#1e293b]/50 border border-[#334155]/30 rounded-lg">
-                          <div className="w-10 h-10 bg-blue-500/10 flex items-center justify-center rounded">
-                            <Plus size={16} className="text-blue-400" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold text-white truncate">{clip.displayLabel || clip.fileName}</div>
-                            <div className="text-[9px] text-gray-500 uppercase mt-1 font-mono tracking-tighter">{clip.id}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xs text-white font-mono mb-1">{clip.duration || '--:--'}</div>
-                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                              clip.status === 'COMPLETED' ? 'text-green-400 border-green-400/20 bg-green-400/5' : 'text-amber-400 border-amber-400/20 bg-amber-400/5'
-                            }`}>
-                              {clip.status}
-                            </span>
-                          </div>
-                        </div>
-                      ))
+
+                {detailTab === 'CLIPS' && (
+                  <div>
+                    {selectedEntry.isSystem ? (
+                      <div className="text-gray-600 text-[10px]">System rows have no clips.</div>
+                    ) : (selectedEntry.clips || []).length === 0 ? (
+                      <div className="text-gray-600 text-[10px]">No clips attached to this story.</div>
                     ) : (
-                      <div className="col-span-2 py-20 text-center">
-                        <div className="text-gray-600 text-xs uppercase tracking-widest">No production clips found for this story</div>
-                      </div>
+                      <table className="w-full text-[10px]">
+                        <thead>
+                          <tr className="text-gray-500 text-[9px] border-b border-gray-800/60">
+                            <th className="py-1 px-2 text-left">FILE NAME</th>
+                            <th className="py-1 px-2 text-left">ORIGINAL</th>
+                            <th className="py-1 px-2 text-center">DURATION</th>
+                            <th className="py-1 px-2 text-center">STATUS</th>
+                            <th className="py-1 px-2 text-left">DISPLAY LABEL</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedEntry.clips || []).map((c) => (
+                            <tr key={c.clipId} className="border-b border-gray-800/30">
+                              <td className="py-1 px-2 font-mono text-green-400">{c.fileName}</td>
+                              <td className="py-1 px-2 text-gray-500">{c.originalFileName}</td>
+                              <td className="py-1 px-2 text-center font-mono">{c.duration || '--:--'}</td>
+                              <td className="py-1 px-2 text-center">
+                                <span className={`text-[8px] font-bold px-1.5 py-[1px] rounded ${c.status === 'COMPLETED' || c.status === 'APPROVED' ? 'bg-green-600/20 text-green-400' : c.status === 'EDITING' || c.status === 'AVAILABLE' ? 'bg-yellow-600/20 text-yellow-500' : 'bg-gray-600/20 text-gray-400'}`}>{c.status}</span>
+                              </td>
+                              <td className="py-1 px-2">{c.displayLabel || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     )}
                   </div>
                 )}
-                
-                {activeDetailTab === 'CG GRAPHICS' && (
-                  <div className="py-20 text-center">
-                    <div className="text-gray-600 text-xs uppercase tracking-widest">Graphics Engine Offline</div>
-                  </div>
-                )}
+
+                {detailTab === 'CG' && <div className="text-gray-600 text-[10px]">CG Graphics — Coming soon.</div>}
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ═══ CREATE EMPTY STORY MODAL ═══ */}
-      {showNewStoryForm && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm">
-          <div className="bg-[#0f1420] rounded-xl border border-[#334155] w-[550px] shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] bg-[#1e293b]/20">
-              <h3 className="text-white font-bold text-sm uppercase tracking-widest">Create New Story</h3>
-              <button onClick={() => setShowNewStoryForm(false)} className="text-gray-500 hover:text-white transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className="p-7 flex flex-col gap-5">
-              <div className="grid grid-cols-2 gap-5">
-                <div className="col-span-2">
-                  <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1.5 block">Story Title</label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="Enter descriptive title..."
-                    className="w-full p-3 bg-[#0a0f1a] border border-[#1e293b] rounded-md text-sm text-white placeholder:text-gray-700 focus:outline-none focus:border-blue-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1.5 block">Story Slug</label>
-                  <input
-                    type="text"
-                    value={newSlug}
-                    onChange={(e) => setNewSlug(e.target.value.toUpperCase().replace(/\s+/g, '-'))}
-                    placeholder="AUTO-GENERATED"
-                    className="w-full p-3 bg-[#0a0f1a] border border-[#1e293b] rounded-md text-sm text-white font-mono placeholder:text-gray-700 focus:outline-none focus:border-blue-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1.5 block">Format</label>
-                  <select
-                    value={newFormat}
-                    onChange={(e) => setNewFormat(e.target.value)}
-                    className="w-full p-3 bg-[#0a0f1a] border border-[#1e293b] rounded-md text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer"
-                  >
-                    <option value="" disabled>Select Format</option>
-                    <option value="PKG">PKG</option>
-                    <option value="VO">VO</option>
-                    <option value="VO+BITE">VO+BITE</option>
-                    <option value="ANCHOR">ANCHOR</option>
+      {/* ══════ CREATE MODAL ══════ */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowCreateModal(false)}>
+          <div className="bg-[#131820] border border-gray-700/60 rounded-lg p-4 w-[420px] max-h-[75vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-bold mb-3">Create Empty Story</h2>
+            <div className="space-y-2">
+              <div>
+                <label className="text-[9px] text-gray-500">Title *</label>
+                <input value={nTitle} onChange={(e) => setNTitle(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px]" placeholder="Story title..." />
+              </div>
+              <div>
+                <label className="text-[9px] text-gray-500">Slug</label>
+                <input value={nSlug} onChange={(e) => setNSlug(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px]" placeholder="SLUG_NAME" />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[9px] text-gray-500">Format</label>
+                  <select value={nFormat} onChange={(e) => setNFormat(e.target.value as Story['format'])} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px]">
+                    <option value="">Select...</option>
+                    <option value="ANCHOR">ANCHOR</option><option value="PKG">PKG</option><option value="VO">VO</option>
+                    <option value="VO+BITE">VO+BITE</option><option value="LIVE">LIVE</option><option value="GFX">GFX</option>
                   </select>
                 </div>
+                <div className="flex-1">
+                  <label className="text-[9px] text-gray-500">Planned Duration</label>
+                  <input value={nDur} onChange={(e) => setNDur(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] font-mono" />
+                </div>
               </div>
-              
               <div>
-                <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1.5 block">Initial Content / Pitch</label>
-                <textarea
-                  value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
-                  placeholder="Enter brief story outline or content..."
-                  rows={4}
-                  className="w-full p-3 bg-[#0a0f1a] border border-[#1e293b] rounded-md text-sm text-white placeholder:text-gray-700 resize-none focus:outline-none focus:border-blue-500/50 leading-relaxed"
-                />
+                <label className="text-[9px] text-gray-500">Content</label>
+                <textarea value={nContent} onChange={(e) => setNContent(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] h-16 resize-none" placeholder="Script content..." />
               </div>
             </div>
-            
-            <div className="flex justify-end gap-3 px-7 py-5 bg-[#1e293b]/10 border-t border-[#1e293b]">
-              <button 
-                onClick={() => { resetNewForm(); setShowNewStoryForm(false); }}
-                className="px-5 py-2 text-xs font-bold text-gray-500 hover:text-white uppercase tracking-wider transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (!newTitle.trim()) return;
-                  createStoryInRundown({
-                    title: newTitle.trim(),
-                    slug: newSlug.trim() || newTitle.trim().toUpperCase().replace(/\s+/g, '-'),
-                    format: newFormat || 'ANCHOR',
-                    content: newContent.trim(),
-                    plannedDuration: '00:01:00',
-                    rundownId: selectedRundownId!,
-                  });
-                  resetNewForm();
-                  setShowNewStoryForm(false);
-                }}
-                disabled={!newTitle.trim()}
-                className="px-7 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded font-bold text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 transition-all"
-              >
-                CREATE & ADD TO BULLET
-              </button>
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setShowCreateModal(false)} className="px-3 py-1 text-[10px] text-gray-400 hover:text-white">Cancel</button>
+              <button onClick={createEmpty} disabled={!nTitle.trim()} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded disabled:opacity-40">Create & Add</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ═══ ADD EXISTING STORY MODAL ═══ */}
-      {showExistingPicker && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm">
-          <div className="bg-[#0f1420] rounded-xl border border-[#334155] w-[600px] max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] bg-[#1e293b]/20">
-              <h3 className="text-white font-bold text-sm uppercase tracking-widest">Story Archive Picker</h3>
-              <button onClick={() => setShowExistingPicker(false)} className="text-gray-500 hover:text-white">
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className="p-6 bg-[#0a0f1a] border-b border-[#1e293b]">
-              <div className="relative">
-                <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
-                <input
-                  type="text"
-                  value={storySearchQuery}
-                  onChange={(e) => setStorySearchQuery(e.target.value)}
-                  placeholder="SEARCH BY SLUG OR TITLE..."
-                  className="w-full pl-10 pr-4 py-3 bg-[#0f1420] border border-[#1e293b] rounded-lg text-sm text-white placeholder:text-gray-700 focus:outline-none focus:border-blue-500/50 font-bold uppercase tracking-wider"
-                />
-              </div>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {availableStories.map((story) => (
-                <div
-                  key={story.id}
-                  className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b]/50 hover:bg-[#1e293b]/20 cursor-pointer group"
-                >
-                  <div className="flex-1 pr-6">
-                    <div className="text-[13px] text-white font-bold group-hover:text-blue-400 transition-colors"
-                         style={story.title.match(/[^\x00-\x7F]/) ? { fontFamily: "'Noto Sans Kannada', sans-serif" } : {}}>
-                      {story.title}
-                    </div>
-                    <div className="flex items-center gap-4 mt-1.5">
-                      <span className="text-[9px] text-gray-600 font-mono font-bold tracking-widest uppercase">{story.id}</span>
-                      <span className="text-[9px] px-1.5 py-0.5 bg-[#1e293b] text-gray-500 rounded font-bold uppercase tracking-widest border border-slate-800">{story.format}</span>
-                      <span className={`text-[9px] font-bold tracking-widest uppercase ${story.status === 'READY' ? 'text-green-500' : 'text-gray-600'}`}>{story.status}</span>
-                    </div>
+      {/* ══════ ADD EXISTING MODAL ══════ */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
+          <div className="bg-[#131820] border border-gray-700/60 rounded-lg p-4 w-[420px] max-h-[75vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-bold mb-3">Add Existing Story</h2>
+            <input value={addSearch} onChange={(e) => setAddSearch(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] mb-2" placeholder="Search stories..." />
+            <div className="space-y-1 max-h-[350px] overflow-auto">
+              {filteredExisting.length === 0 ? (
+                <div className="text-gray-600 text-[10px] py-3 text-center">No available stories</div>
+              ) : filteredExisting.map((s) => (
+                <div key={s.storyId} className="flex items-center justify-between bg-gray-800/40 rounded px-2 py-1.5">
+                  <div>
+                    <div className="text-[11px] font-semibold">{s.title}</div>
+                    <div className="text-[9px] text-gray-500">{s.storyId} · {s.format || '—'} · {s.status}</div>
                   </div>
-                  <button
-                    onClick={() => {
-                      addStoryToRundown(selectedRundownId!, story.id);
-                      setShowExistingPicker(false);
-                    }}
-                    className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded font-bold uppercase tracking-widest shadow-md transition-all active:scale-95"
-                  >
-                    + ADD
-                  </button>
+                  <button onClick={() => addExisting(s.storyId)} className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-bold px-2 py-[2px] rounded">Add</button>
                 </div>
               ))}
-              
-              {availableStories.length === 0 && (
-                <div className="py-24 text-center">
-                  <div className="text-gray-700 text-xs font-bold uppercase tracking-widest">No available stories found matching query</div>
-                </div>
-              )}
+            </div>
+            <div className="flex justify-end mt-3">
+              <button onClick={() => setShowAddModal(false)} className="px-3 py-1 text-[10px] text-gray-400 hover:text-white">Close</button>
             </div>
           </div>
         </div>
       )}
-
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
-      `}</style>
     </div>
   );
 }
