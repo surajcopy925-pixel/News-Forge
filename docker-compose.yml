@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: newsforge_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: newsforge_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - newsforge_pgdata:/var/lib/postgresql/data
+
+volumes:
+  newsforge_pgdata:

@@ -1,0 +1,233 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ═══════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════
+
+enum StoryFormat {
+  PKG
+  VO
+  VO_BITE
+  ANCHOR
+  BREAK
+  LIVE
+  GFX
+  EMPTY
+}
+
+enum StoryStatus {
+  NOT_READY
+  EDITING
+  READY
+  DRAFT
+  APPROVED
+  SUBMITTED
+}
+
+enum ClipStatus {
+  PENDING
+  EDITING
+  DONE
+}
+
+enum RundownStatus {
+  PLANNING
+  READY
+  REHEARSAL
+  LIVE
+  DONE
+}
+
+enum MosStatus {
+  SYNCED
+  OFFLINE
+}
+
+enum ScriptSource {
+  POLISHED
+  RAW
+}
+
+enum UserRole {
+  REPORTER
+  EDITOR
+  COPY_EDITOR
+  PRODUCER
+  ADMIN
+}
+
+enum Language {
+  en
+  kn
+}
+
+enum Priority {
+  URGENT
+  NORMAL
+  LOW
+}
+
+// ═══════════════════════════════════════
+// MODELS
+// ═══════════════════════════════════════
+
+model User {
+  userId       String   @id
+  fullName     String
+  role         UserRole
+  email        String   @unique
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  storiesCreated  Story[]     @relation("StoryCreator")
+  storiesPolished Story[]     @relation("StoryPolisher")
+  storiesSentBy   Story[]     @relation("StorySender")
+  claimedClips    StoryClip[] @relation("ClipClaimer")
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model Story {
+  storyId         String      @id
+  title           String
+  slug            String
+  format          StoryFormat @default(EMPTY)
+  status          StoryStatus @default(DRAFT)
+
+  content         String @default("")
+  rawScript       String @default("")
+  polishedScript  String?
+  anchorScript    String @default("")
+  voiceoverScript String @default("")
+  editorialNotes  String @default("")
+
+  scriptSentToRundown String?
+  sentToRundownId     String?
+  sentToRundownAt     DateTime?
+  sentBy              String?
+
+  polishedBy String?
+  polishedAt DateTime?
+  isPolished Boolean @default(false)
+
+  createdBy       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  plannedDuration String   @default("00:00:00")
+  rundownId       String?
+  orderIndex      Int      @default(0)
+
+  category String?
+  location String?
+  source   String?
+  language Language @default(en)
+  priority Priority @default(NORMAL)
+
+  // Relations
+  creator  User    @relation("StoryCreator", fields: [createdBy], references: [userId])
+  polisher User?   @relation("StoryPolisher", fields: [polishedBy], references: [userId])
+  sender   User?   @relation("StorySender", fields: [sentBy], references: [userId])
+  rundown  Rundown? @relation(fields: [rundownId], references: [rundownId])
+
+  clips          StoryClip[]
+  rundownEntries RundownEntry[]
+
+  @@map("stories")
+}
+
+model StoryClip {
+  clipId           String     @id
+  storyId          String
+  fileName         String
+  originalFileName String
+  fileUrl          String?
+  fileType         String     @default("VIDEO/MP4")
+  displayLabel     String     @default("")
+  duration         String?
+  status           ClipStatus @default(PENDING)
+
+  claimedBy   String?
+  claimedAt   DateTime?
+  completedAt DateTime?
+
+  editingInstructions String @default("")
+  editorialNotes      String @default("")
+
+  // Future fields (Phase 3.5/3.6)
+  codec      String?
+  resolution String?
+  fps        String?
+  proxyUrl   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  story   Story @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
+  claimer User? @relation("ClipClaimer", fields: [claimedBy], references: [userId])
+
+  @@map("story_clips")
+}
+
+model Rundown {
+  rundownId       String        @id
+  title           String
+  date            String
+  broadcastTime   String
+  plannedDuration String        @default("00:30:00")
+  status          RundownStatus @default(PLANNING)
+  mosStatus       MosStatus     @default(OFFLINE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  stories Story[]
+  entries RundownEntry[]
+
+  @@unique([date, broadcastTime])
+  @@map("rundowns")
+}
+
+model RundownEntry {
+  entryId       String        @id
+  rundownId     String
+  storyId       String
+  orderIndex    Int           @default(0)
+  scriptContent String?
+  scriptSource  ScriptSource?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  rundown Rundown @relation(fields: [rundownId], references: [rundownId], onDelete: Cascade)
+  story   Story   @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
+
+  @@map("rundown_entries")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  oldValue  Json?
+  newValue  Json?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User? @relation(fields: [userId], references: [userId])
+
+  @@map("audit_logs")
+}
