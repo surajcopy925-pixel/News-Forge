@@ -14,33 +14,33 @@ echo ""
 PASS=0
 FAIL=0
 
-# Helper function
+# Helper functions — variables MUST NOT be escaped with backslash
 check_response() {
-  local TEST_NAME="\$1"
-  local RESPONSE="\$2"
-  local EXPECTED="\$3"
-  
-  if echo "$RESPONSE" | grep -q "$EXPECTED"; then
-    echo "  ✅ PASS — $TEST_NAME"
+  local test_name="$1"
+  local response="$2"
+  local expected="$3"
+
+  if echo "$response" | grep -q "$expected"; then
+    echo "  ✅ PASS — $test_name"
     PASS=$((PASS+1))
   else
-    echo "  ❌ FAIL — $TEST_NAME"
-    echo "     Expected to contain: $EXPECTED"
-    echo "     Got: $(echo $RESPONSE | head -c 200)"
+    echo "  ❌ FAIL — $test_name"
+    echo "     Expected to contain: $expected"
+    echo "     Got: $(echo "$response" | head -c 300)"
     FAIL=$((FAIL+1))
   fi
 }
 
 check_status() {
-  local TEST_NAME="\$1"
-  local STATUS="\$2"
-  local EXPECTED="\$3"
-  
-  if [ "$STATUS" -eq "$EXPECTED" ]; then
-    echo "  ✅ PASS — $TEST_NAME (HTTP $STATUS)"
+  local test_name="$1"
+  local status="$2"
+  local expected="$3"
+
+  if [ "$status" -eq "$expected" ] 2>/dev/null; then
+    echo "  ✅ PASS — $test_name (HTTP $status)"
     PASS=$((PASS+1))
   else
-    echo "  ❌ FAIL — $TEST_NAME (Expected HTTP $EXPECTED, got $STATUS)"
+    echo "  ❌ FAIL — $test_name (Expected HTTP $expected, got $status)"
     FAIL=$((FAIL+1))
   fi
 }
@@ -107,7 +107,7 @@ if [ -n "$NEW_STORY_ID" ]; then
     -H "Content-Type: application/json" \
     -d "{\"storyId\":\"$NEW_STORY_ID\",\"originalFileName\":\"test_footage.mp4\",\"duration\":\"01:30\"}")
   check_response "POST /api/clips creates clip" "$RESP" "test_footage.mp4"
-  
+
   NEW_CLIP_ID=$(echo "$RESP" | grep -o '"clipId":"[^"]*"' | head -1 | cut -d'"' -f4)
   echo "     Created: $NEW_CLIP_ID"
 else
@@ -137,7 +137,7 @@ else
   FAIL=$((FAIL+1))
 fi
 
-# Test 12: Claim already-claimed clip (should fail 409)
+# Test 12: Claim already-claimed clip (must fail 409 — status is EDITING, not PENDING)
 if [ -n "$NEW_CLIP_ID" ]; then
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/clips/$NEW_CLIP_ID/claim" \
     -H "Content-Type: application/json" \
@@ -160,7 +160,7 @@ else
   FAIL=$((FAIL+2))
 fi
 
-# Test 14: Complete already-done clip (should fail 409)
+# Test 14: Complete already-done clip (must fail 409 — status is DONE, not EDITING)
 if [ -n "$NEW_CLIP_ID" ]; then
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/clips/$NEW_CLIP_ID/complete" \
     -H "Content-Type: application/json" \
@@ -177,7 +177,7 @@ fi
 echo ""
 echo "── RUNDOWNS ─────────────────────────"
 
-# Test 15: List rundowns (should be empty)
+# Test 15: List rundowns
 RESP=$(curl -s "$BASE/rundowns")
 check_response "GET /api/rundowns returns array" "$RESP" "["
 
@@ -205,7 +205,7 @@ if [ -n "$NEW_RUNDOWN_ID" ]; then
     -H "Content-Type: application/json" \
     -d '{"storyId":"STY-20250610-001","userId":"USR-001"}')
   check_response "POST /api/rundowns/:id/entries adds story" "$RESP" "STY-20250610-001"
-  
+
   NEW_ENTRY_ID=$(echo "$RESP" | grep -o '"entryId":"[^"]*"' | head -1 | cut -d'"' -f4)
   echo "     Created: $NEW_ENTRY_ID"
 else
@@ -279,6 +279,12 @@ fi
 if [ -n "$NEW_STORY_ID" ]; then
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE/stories/$NEW_STORY_ID")
   check_status "DELETE test story" "$STATUS" 200
+fi
+
+# Delete test rundown
+if [ -n "$NEW_RUNDOWN_ID" ]; then
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE/rundowns/$NEW_RUNDOWN_ID")
+  check_status "DELETE test rundown" "$STATUS" 200
 fi
 
 # ═══════════════════════════════════════
