@@ -2,11 +2,15 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
+import bcrypt from 'bcryptjs';
+
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log('🌱 Seeding database...');
+
+  const defaultPasswordHash = await bcrypt.hash('newsforge123', 10);
 
   // ═══════════════════════════════════════
   // CLEAN ALL TABLES (order matters for FK)
@@ -28,6 +32,7 @@ async function main() {
         fullName: 'Priya Sharma',
         role: 'PRODUCER',
         email: 'priya.sharma@newsforge.com',
+        passwordHash: defaultPasswordHash,
       },
     }),
     prisma.user.create({
@@ -36,6 +41,7 @@ async function main() {
         fullName: 'Rahul Menon',
         role: 'EDITOR',
         email: 'rahul.menon@newsforge.com',
+        passwordHash: defaultPasswordHash,
       },
     }),
     prisma.user.create({
@@ -44,6 +50,7 @@ async function main() {
         fullName: 'Kavitha Rao',
         role: 'COPY_EDITOR',
         email: 'kavitha.rao@newsforge.com',
+        passwordHash: defaultPasswordHash,
       },
     }),
     prisma.user.create({
@@ -52,6 +59,7 @@ async function main() {
         fullName: 'Suresh Kumar',
         role: 'ADMIN',
         email: 'suresh.kumar@newsforge.com',
+        passwordHash: defaultPasswordHash,
       },
     }),
     prisma.user.create({
@@ -60,6 +68,7 @@ async function main() {
         fullName: 'Deepa Nair',
         role: 'REPORTER',
         email: 'deepa.nair@newsforge.com',
+        passwordHash: defaultPasswordHash,
       },
     }),
     prisma.user.create({
@@ -68,9 +77,11 @@ async function main() {
         fullName: 'Arjun Patel',
         role: 'REPORTER',
         email: 'arjun.patel@newsforge.com',
+        passwordHash: defaultPasswordHash,
       },
     }),
   ]);
+
   console.log(`  ✅ Created ${users.length} users`);
 
   // ═══════════════════════════════════════

@@ -84,6 +84,10 @@ export function generateEntryId(): string {
   return `ENT-${Date.now().toString(36).toUpperCase()}`;
 }
 
+export function generateCgItemId() {
+  return `CG-${Date.now().toString(36).toUpperCase()}`;
+}
+
 export function generateSlug(title: string): string {
   return title
     .toLowerCase()

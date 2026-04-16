@@ -23,6 +23,7 @@ export interface Story {
   editorialNotes: string;
   status: StoryStatus;
   priority: 'URGENT' | 'NORMAL' | 'LOW';
+  language: 'en' | 'kn';
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -39,7 +40,8 @@ export interface Story {
   sentToRundownId: string | null;
   sentToRundownAt: string | null;
   sentBy: string | null;
-  scriptSentToRundown: string | null;
+  scriptSentToRundown: boolean;
+  _count?: { cgItems: number; clips: number };
 
   // UI/Compatibility fields
   id?: string; // Alias for storyId
@@ -56,6 +58,7 @@ export interface StoryClip {
   fileName: string;
   originalFileName: string;
   fileUrl: string | null;
+  fileSize: number | null;
   fileType: string;
 
   // CLIP DATA
@@ -71,7 +74,13 @@ export interface StoryClip {
   // ✅ ADDED FIELDS
   editingInstructions: string;
   editorialNotes: string;
+  codec?: string | null;
+  resolution?: string | null;
+  fps?: string | null;
+  proxyUrl?: string | null;
+  thumbnailUrl?: string | null;
 }
+
 
 export interface Rundown {
   rundownId: string;
@@ -95,14 +104,27 @@ export interface RundownEntry {
   scriptSource?: 'POLISHED' | 'RAW' | null;
 }
 
-export interface CGItem {
-  cgId: string;
-  id: string;
+export type CgStatus = 'DRAFT' | 'READY' | 'ON_AIR';
+
+export interface CgItem {
+  cgItemId: string;
   storyId: string;
-  cgType: string;
+  entryId: string | null;
   templateName: string;
-  displayLabel: string;
-  status: string;
-  content: any;
+  concept: string;
+  variant: string;
+  dataElementName: string;
+  dataElementId: string | null;
+  fieldData: Record<string, unknown>;
+  mosObjId: string | null;
+  mosObjXml: string | null;
+  orderIndex: number;
+  channel: string;
+  layer: string;
+  status: CgStatus;
+  createdBy: string;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 

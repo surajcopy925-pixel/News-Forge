@@ -41,3 +41,17 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# Uploaded media files
+/uploads
+
+# Logs
+*.log
+/server.log
+/server.err.log
+
+# Test results
+/test-results
+/playwright-report
+
+# Misc

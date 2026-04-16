@@ -8,6 +8,8 @@ import {
   conflictResponse,
   createAuditLog,
 } from '@/lib/api-helpers';
+import { getCurrentUserId } from '@/lib/get-current-user';
+import { emitClipEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ clipId: string }> };
 
@@ -15,10 +17,7 @@ type Params = { params: Promise<{ clipId: string }> };
 export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { clipId } = await params;
-    const body = await req.json();
-    const { userId } = body;
-
-    if (!userId) return errorResponse('userId is required');
+    const userId = await getCurrentUserId();
 
     const clip = await prisma.storyClip.findUnique({ where: { clipId } });
     if (!clip) return notFoundResponse('Clip', clipId);
@@ -47,6 +46,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       oldValue: { status: 'PENDING' },
       newValue: { status: 'EDITING', claimedBy: userId },
     });
+
+    emitClipEvent('updated', clipId, { storyId: updated.storyId });
 
     return successResponse(toFrontendClip(updated));
   } catch (e: any) {

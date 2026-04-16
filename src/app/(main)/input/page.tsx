@@ -3,18 +3,25 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Upload, Plus, Folder, Film, X, FileText } from 'lucide-react';
-import { useNewsForgeStore } from '@/store/useNewsForgeStore';
+import { useAuth } from '@/hooks/useAuth';
+import {
+  useStories,
+  useStoryClips,
+  useCreateStory,
+  useUpdateStory,
+  useDeleteStory,
+} from '@/hooks/useStories';
+import { useCreateClip, useDeleteClip } from '@/hooks/useClips';
 import type { Story, StoryClip } from '@/types/types';
 import {
-  generateStoryId,
-  generateClipFileName,
-  generateClipId,
   getVideoDuration,
   detectLanguage,
   formatDuration,
 } from '@/utils/metadata';
 
 /* ── CONSTANTS ── */
+const EMPTY_ARRAY: any[] = [];
+
 const CATEGORY_LIST = ['Crime', 'Politics', 'Sports', 'National', 'Business', 'Entertainment'];
 const FORMAT_LIST = ['ANCHOR', 'PKG', 'VO', 'VO+BITE', 'LIVE', 'GFX', 'BREAK', 'PHONE-IN', 'OOV'];
 
@@ -46,14 +53,15 @@ const StatusBadge = ({ status }: { status: string }) => {
 
 /* ═══════════════════════ MAIN COMPONENT ═══════════════════════ */
 export default function InputPage() {
-  /* ── store selectors (individual, not whole store) ── */
-  const stories = useNewsForgeStore((s) => s.stories);
-  const storyClips = useNewsForgeStore((s) => s.storyClips);
-  const createStory = useNewsForgeStore((s) => s.createStory);
-  const updateStoryField = useNewsForgeStore((s) => s.updateStoryField);
-  const deleteStory = useNewsForgeStore((s) => s.deleteStory);
-  const addClip = useNewsForgeStore((s) => s.addClip);
-  const deleteClip = useNewsForgeStore((s) => s.deleteClip);
+  /* ── API data via TanStack Query ── */
+  const { data: stories = [], isLoading: storiesLoading } = useStories();
+  const { userId } = useAuth();
+
+  const createStoryMutation = useCreateStory();
+  const updateStoryMutation = useUpdateStory();
+  const deleteStoryMutation = useDeleteStory();
+  const createClipMutation = useCreateClip();
+  const deleteClipMutation = useDeleteClip();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -71,16 +79,17 @@ export default function InputPage() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
-  /* ── clips for selected story ── */
-  const clips = useMemo(() => {
-    if (!selectedStoryId) return [];
-    return storyClips.filter((c) => c.storyId === selectedStoryId);
-  }, [selectedStoryId, storyClips]);
+  /* ── clips for selected story (from API) ── */
+  const { data: clips = EMPTY_ARRAY } = useStoryClips(selectedStoryId);
+
+
+  /* ── saving state ── */
+  const isSaving = createStoryMutation.isPending || updateStoryMutation.isPending;
 
   /* ── load story data when selected ── */
   useEffect(() => {
     if (selectedStoryId) {
-      const story = stories.find((s) => s.storyId === selectedStoryId);
+      const story = stories.find((s: any) => s.storyId === selectedStoryId);
       if (story) {
         setFormTitle(story.title);
         setFormCategory(story.category || '');
@@ -94,6 +103,7 @@ export default function InputPage() {
     } else {
       resetForm();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStoryId, stories]);
 
   const resetForm = () => {
@@ -124,13 +134,9 @@ export default function InputPage() {
 
   const handleUploadFiles = async (storyId: string, filesToUpload: File[]) => {
     setIsUploading(true);
-    const existingClips = storyClips.filter((c) => c.storyId === storyId);
-    let clipIndex = existingClips.length + 1;
 
     for (const file of filesToUpload) {
-      const autoFileName = generateClipFileName(storyId, clipIndex, file.name);
-      const clipId = generateClipId(storyId, clipIndex);
-
+      // 1. Get duration from browser
       let duration = '00:00:00';
       try {
         duration = await getVideoDuration(file);
@@ -138,22 +144,46 @@ export default function InputPage() {
         duration = '00:00:00';
       }
 
-      addClip({
-        clipId,
-        storyId,
-        fileName: autoFileName,
-        originalFileName: file.name,
-        fileUrl: URL.createObjectURL(file),
-        fileType: file.type || 'video/mp4',
-        displayLabel: '',
-        status: 'PENDING',
-        claimedBy: null,
-        claimedAt: null,
-        completedAt: null,
-        duration,
-      });
+      try {
+        // 2. Upload actual file to server
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('storyId', storyId);
 
-      clipIndex++;
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!uploadRes.ok) {
+          const err = await uploadRes.json();
+          throw new Error(err.error || 'Upload failed');
+        }
+
+        const uploadData = await uploadRes.json();
+
+        // 3. Create clip record with real file URL and metadata
+        await createClipMutation.mutateAsync({
+          storyId,
+          fileName: uploadData.fileName,
+          originalFileName: uploadData.originalFileName,
+          fileUrl: uploadData.fileUrl,
+          fileSize: uploadData.fileSize,
+          fileType: uploadData.fileType || file.type || 'video/mp4',
+          // Phase 3.5 - auto-populated from ffprobe
+          duration: uploadData.duration || duration,
+          codec: uploadData.codec,
+          resolution: uploadData.resolution,
+          fps: uploadData.fps,
+          // Phase 3.6 - proxy paths
+          proxyUrl: uploadData.proxyUrl,
+          thumbnailUrl: uploadData.thumbnailUrl,
+        });
+
+      } catch (error: any) {
+        console.error('Failed to upload/create clip:', error.message);
+        alert(`Failed to upload ${file.name}: ${error.message}`);
+      }
     }
 
     setPendingFiles((prev) => prev.filter((f) => !filesToUpload.includes(f)));
@@ -161,75 +191,62 @@ export default function InputPage() {
   };
 
   /* ── create or update story ── */
-  const handleCreateOrUpdateStory = (shouldSubmit: boolean) => {
+  const handleCreateOrUpdateStory = async (shouldSubmit: boolean) => {
     if (!formTitle) return alert('Title is required');
 
     const language = detectLanguage(formTitle + ' ' + formContent);
-    const now = new Date().toISOString();
 
-    if (selectedStoryId) {
-      // UPDATE existing story
-      updateStoryField(selectedStoryId, 'title', formTitle);
-      updateStoryField(selectedStoryId, 'slug', generateSlug(formTitle));
-      updateStoryField(selectedStoryId, 'category', formCategory);
-      updateStoryField(selectedStoryId, 'format', formFormat);
-      updateStoryField(selectedStoryId, 'location', formLocation);
-      updateStoryField(selectedStoryId, 'source', formSource);
-      updateStoryField(selectedStoryId, 'content', formContent);
-      updateStoryField(selectedStoryId, 'priority', formPriority);
-      updateStoryField(selectedStoryId, 'language', language === 'KN' ? 'kn' : 'en');
+    try {
+      if (selectedStoryId) {
+        // UPDATE existing story via API
+        await updateStoryMutation.mutateAsync({
+          storyId: selectedStoryId,
+          data: {
+            title: formTitle,
+            slug: generateSlug(formTitle),
+            category: formCategory,
+            format: (formFormat as any) || '',
+            location: formLocation,
+            source: formSource,
+            content: formContent,
+            priority: (formPriority as any) || 'NORMAL',
+            language: language === 'KN' ? 'kn' : 'en',
+            ...(shouldSubmit ? { status: 'SUBMITTED' } : {}),
+          },
+        });
+      } else {
+        // CREATE new story via API
+        const result = await createStoryMutation.mutateAsync({
+          title: formTitle,
+          slug: generateSlug(formTitle),
+          format: (formFormat as any) || '',
+          status: shouldSubmit ? 'SUBMITTED' : 'DRAFT',
+          content: formContent,
+          createdBy: userId!,
+          category: formCategory,
+          location: formLocation,
+          source: formSource,
+          language: language === 'KN' ? 'kn' : 'en',
+          priority: (formPriority as any) || 'NORMAL',
+          plannedDuration: '00:00:00',
+        });
+
+        // Select the newly created story
+        setSelectedStoryId(result.storyId);
+
+        // Upload pending files for the new story
+        if (pendingFiles.length > 0) {
+          await handleUploadFiles(result.storyId, pendingFiles);
+          setPendingFiles([]);
+        }
+      }
 
       if (shouldSubmit) {
-        updateStoryField(selectedStoryId, 'status', 'SUBMITTED');
+        alert('Story submitted successfully!');
       }
-    } else {
-      // CREATE new story
-      const storyId = generateStoryId(language);
-
-      const newStory: Story = {
-        storyId,
-        title: formTitle,
-        slug: generateSlug(formTitle),
-        format: (formFormat as Story['format']) || '',
-        status: shouldSubmit ? 'SUBMITTED' : 'DRAFT',
-        content: formContent,
-        rawScript: formContent,
-        polishedScript: null,
-        anchorScript: '',
-        voiceoverScript: '',
-        editorialNotes: '',
-        scriptSentToRundown: null,
-        sentToRundownId: null,
-        sentToRundownAt: null,
-        sentBy: null,
-        polishedBy: null,
-        polishedAt: null,
-        isPolished: false,
-        createdBy: 'USR-001',
-        createdAt: now,
-        updatedAt: now,
-        plannedDuration: '00:00:00',
-        rundownId: null,
-        orderIndex: 0,
-        category: formCategory,
-        location: formLocation,
-        source: formSource,
-        language: language === 'KN' ? 'kn' : 'en',
-        priority: formPriority,
-      };
-
-      createStory(newStory);
-      setSelectedStoryId(storyId);
-
-      // Upload pending files for the new story
-      if (pendingFiles.length > 0) {
-        handleUploadFiles(storyId, pendingFiles);
-        setPendingFiles([]);
-      }
-    }
-
-    if (shouldSubmit) {
-      alert('Story submitted successfully!');
+    } catch (error: any) {
+      console.error('Failed to save story:', error.message);
+      alert('Failed to save story: ' + error.message);
     }
   };
 
@@ -247,7 +264,7 @@ export default function InputPage() {
   const storiesByCategory = useMemo(() => {
     const map: Record<string, Story[]> = {};
     CATEGORY_LIST.forEach((cat) => (map[cat] = []));
-    stories.forEach((story) => {
+    stories.forEach((story: any) => {
       const cat = story.category || 'National';
       if (map[cat]) {
         map[cat].push(story);
@@ -263,9 +280,20 @@ export default function InputPage() {
 
   /* ── helper: file size display ── */
   const clipFileSize = (clip: StoryClip) => {
-    // We don't store fileSize in StoryClip type, so show type instead
     return clip.fileType || 'video';
   };
+
+  /* ── Loading state ── */
+  if (storiesLoading) {
+    return (
+      <div className="flex h-full bg-nf-bg items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-400">Loading stories...</p>
+        </div>
+      </div>
+    );
+  }
 
   /* ═══════════════════════ RENDER ═══════════════════════ */
   return (
@@ -285,8 +313,8 @@ export default function InputPage() {
             <span>New Story</span>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {CATEGORY_LIST.map((catName) => {
+                <div className="flex-1 overflow-y-auto" data-testid="story-list">
+                  {CATEGORY_LIST.map((catName) => {
             const isActive = selectedCategory === catName;
             const categoryStories = storiesByCategory[catName] || [];
             return (
@@ -303,7 +331,7 @@ export default function InputPage() {
                 </button>
                 {isActive && (
                   <div className="pl-8 border-l border-nf-border/30 ml-5 py-1">
-                    {categoryStories.map((story) => (
+                    {categoryStories.map((story: any) => (
                       <div
                         key={story.storyId}
                         onClick={() => setSelectedStoryId(story.storyId)}
@@ -325,7 +353,7 @@ export default function InputPage() {
                           onClick={(e) => {
                             e.stopPropagation();
                             if (confirm(`Delete story ${story.storyId}?`)) {
-                              deleteStory(story.storyId);
+                              deleteStoryMutation.mutate(story.storyId);
                               if (selectedStoryId === story.storyId) resetForm();
                             }
                           }}
@@ -371,9 +399,18 @@ export default function InputPage() {
             <div className="space-y-4">
               <FormField label="Title">
                 <input
+                  data-testid="story-title"
                   type="text" value={formTitle} onChange={(e) => setFormTitle(e.target.value)}
                   className="w-full bg-nf-panel border border-nf-border rounded-md px-3 py-2 text-sm text-gray-200 font-medium"
                   style={formTitle.match(/[^\x00-\x7F]/) ? { fontFamily: "'Noto Sans Kannada', sans-serif" } : {}}
+                />
+              </FormField>
+
+              <FormField label="Slug">
+                <input
+                  data-testid="story-slug"
+                  type="text" value={generateSlug(formTitle)} readOnly
+                  className="w-full bg-nf-panel border border-nf-border rounded-md px-3 py-2 text-xs text-gray-500 font-mono"
                 />
               </FormField>
 
@@ -385,7 +422,7 @@ export default function InputPage() {
                   </select>
                 </FormField>
                 <FormField label="Format">
-                  <select value={formFormat} onChange={(e) => setFormFormat(e.target.value)} className="w-full bg-nf-panel border border-nf-border rounded-md px-3 py-2 text-sm text-gray-200">
+                  <select data-testid="story-format" value={formFormat} onChange={(e) => setFormFormat(e.target.value)} className="w-full bg-nf-panel border border-nf-border rounded-md px-3 py-2 text-sm text-gray-200">
                     <option value="">Select...</option>
                     {FORMAT_LIST.map((f) => <option key={f} value={f}>{f}</option>)}
                   </select>
@@ -414,7 +451,7 @@ export default function InputPage() {
 
                 <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
                   {/* uploaded clips */}
-                  {clips.map((clip) => (
+                  {clips.map((clip: any) => (
                     <div key={clip.clipId} className="bg-nf-surface/50 rounded-md p-2.5 flex items-center justify-between border border-nf-border/30 hover:border-nf-border transition-colors group">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-8 h-8 rounded bg-nf-panel flex items-center justify-center text-blue-400 shrink-0">
@@ -432,7 +469,7 @@ export default function InputPage() {
                         </div>
                       </div>
                       <button
-                        onClick={() => deleteClip(clip.clipId)}
+                        onClick={() => deleteClipMutation.mutate(clip.clipId)}
                         className="p-1.5 hover:bg-red-500/10 rounded transition-all"
                       >
                         <X size={12} className="text-gray-600 hover:text-red-400" />
@@ -497,6 +534,7 @@ export default function InputPage() {
             <div className="space-y-1 flex flex-col h-full min-h-[400px]">
               <label className="text-[11px] font-medium text-gray-400 uppercase">Story Text</label>
               <textarea
+                data-testid="raw-script"
                 value={formContent}
                 onChange={(e) => setFormContent(e.target.value)}
                 className="flex-1 w-full bg-nf-panel border border-nf-border rounded-md p-4 text-sm text-gray-200 leading-relaxed resize-none"
@@ -508,11 +546,20 @@ export default function InputPage() {
 
         {/* bottom bar */}
         <div className="h-14 bg-nf-surface border-t border-nf-border flex items-center justify-end px-6 gap-3">
-          <button onClick={handleSaveDraft} className="bg-nf-panel border border-nf-border text-gray-400 text-xs font-medium px-4 py-2 rounded-md transition-all active:scale-95">
-            Save Draft
+          <button
+            onClick={handleSaveDraft}
+            disabled={isSaving}
+            className="bg-nf-panel border border-nf-border text-gray-400 text-xs font-medium px-4 py-2 rounded-md transition-all active:scale-95 disabled:opacity-50"
+          >
+            {isSaving ? 'Saving...' : 'Save Draft'}
           </button>
-          <button onClick={handleSubmit} className="bg-blue-600 text-white text-xs font-bold px-8 py-2 rounded-md shadow-lg shadow-blue-500/20 active:scale-95">
-            Submit
+          <button
+            data-testid="create-story-btn"
+            onClick={handleSubmit}
+            disabled={isSaving}
+            className="bg-blue-600 text-white text-xs font-bold px-8 py-2 rounded-md shadow-lg shadow-blue-500/20 active:scale-95 disabled:opacity-50"
+          >
+            {isSaving ? 'Submitting...' : 'Submit'}
           </button>
         </div>
       </main>

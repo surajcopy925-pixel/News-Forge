@@ -98,7 +98,7 @@ export const clipsApi = {
       method: 'DELETE',
     }),
 
-  claim: (clipId: string, data: { userId: string }) =>
+  claim: (clipId: string, data: { userId?: string }) =>
     apiFetch<any>(`/clips/${clipId}/claim`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -194,4 +194,41 @@ export const auditApi = {
     const query = params.toString() ? `?${params}` : '';
     return apiFetch<any[]>(`/audit${query}`);
   },
+};
+
+// ═══════════════════════════════════════
+// CG ITEMS
+// ═══════════════════════════════════════
+
+export const cgItemsApi = {
+  list: (storyId: string, entryId?: string | null) => {
+    const query = entryId ? `?storyId=${storyId}&entryId=${entryId}` : `?storyId=${storyId}`;
+    return apiFetch<any[]>(`/cg-items${query}`);
+  },
+
+  get: (cgItemId: string) =>
+    apiFetch<any>(`/cg-items/${cgItemId}`),
+
+  create: (data: any) =>
+    apiFetch<any>('/cg-items', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (cgItemId: string, data: any) =>
+    apiFetch<any>(`/cg-items/${cgItemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (cgItemId: string) =>
+    apiFetch<any>(`/cg-items/${cgItemId}`, {
+      method: 'DELETE',
+    }),
+
+  reorder: (storyId: string, cgItemIds: string[]) =>
+    apiFetch<any>(`/cg-items/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify({ storyId, cgItemIds }),
+    }),
 };

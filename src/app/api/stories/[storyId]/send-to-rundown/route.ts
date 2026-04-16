@@ -8,6 +8,8 @@ import {
   createAuditLog,
   generateEntryId,
 } from '@/lib/api-helpers';
+import { getCurrentUserId } from '@/lib/get-current-user';
+import { emitStoryEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ storyId: string }> };
 
@@ -16,7 +18,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { storyId } = await params;
     const body = await req.json();
-    const { rundownId, userId } = body;
+    const userId = await getCurrentUserId();
+    const { rundownId } = body;
 
     if (!rundownId) return errorResponse('rundownId is required');
 
@@ -65,7 +68,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         scriptSentToRundown: scriptContent,
         sentToRundownId: rundownId,
         sentToRundownAt: new Date(),
-        sentBy: userId || null,
+        sentBy: userId,
         anchorScript: story.anchorScript || scriptContent,
       },
     });
@@ -77,6 +80,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       entityId: storyId,
       newValue: { rundownId, scriptSource },
     });
+
+    emitStoryEvent('updated', storyId);
 
     return successResponse(toFrontendEntry(entry), 201);
   } catch (e: any) {

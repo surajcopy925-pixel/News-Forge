@@ -6,6 +6,7 @@ import {
   notFoundResponse,
   createAuditLog,
 } from '@/lib/api-helpers';
+import { emitEntryEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ rundownId: string }> };
 
@@ -36,6 +37,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       entityId: rundownId,
       newValue: { entryIds },
     });
+
+    emitEntryEvent('reordered', rundownId, { rundownId });
 
     return successResponse({ reordered: true, rundownId, count: entryIds.length });
   } catch (e: any) {

@@ -8,6 +8,7 @@ import {
   generateClipId,
   generateClipFileName,
 } from '@/lib/api-helpers';
+import { emitClipEvent } from '@/lib/api-events';
 
 // GET /api/clips — List clips
 export async function GET(req: NextRequest) {
@@ -67,13 +68,21 @@ export async function POST(req: NextRequest) {
       data: {
         clipId,
         storyId,
-        fileName,
+        fileName: body.fileName || fileName, // Allow passing fileName from upload
         originalFileName,
-        fileType: fileType || 'VIDEO/MP4',
+        fileUrl: body.fileUrl || '',
+        fileSize: body.fileSize || null,
+        fileType: body.fileType || 'video/mp4',
         duration: duration || null,
+        codec: body.codec || null,
+        resolution: body.resolution || null,
+        fps: body.fps || null,
+        proxyUrl: body.proxyUrl || null,
+        thumbnailUrl: body.thumbnailUrl || null,
         status: 'PENDING',
       },
     });
+
 
     await createAuditLog({
       action: 'CREATE',
@@ -81,6 +90,8 @@ export async function POST(req: NextRequest) {
       entityId: clipId,
       newValue: { storyId, originalFileName, fileName },
     });
+
+    emitClipEvent('created', clip.clipId, { storyId });
 
     return successResponse(toFrontendClip(clip), 201);
   } catch (e: any) {

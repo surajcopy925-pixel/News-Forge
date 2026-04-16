@@ -4,6 +4,7 @@ import type {
   Rundown as PrismaRundown,
   RundownEntry as PrismaEntry,
   User as PrismaUser,
+  CgItem as PrismaCgItem,
 } from '@prisma/client';
 
 // ═══════════════════════════════════════
@@ -74,6 +75,7 @@ export function toFrontendStory(s: PrismaStory) {
     slug: s.slug,
     format: (FORMAT_TO_FRONTEND[s.format] ?? '') as any,
     status: (STATUS_TO_FRONTEND[s.status] ?? 'DRAFT') as any,
+    _count: (s as any)._count,
 
     content: s.content,
     rawScript: s.rawScript,
@@ -168,4 +170,13 @@ export function toPrismaFormat(format: string): string {
 
 export function toPrismaStatus(status: string): string {
   return STATUS_TO_PRISMA[status] ?? 'DRAFT';
+}
+
+export function toCgItemFrontend(c: PrismaCgItem) {
+  return {
+    ...c,
+    fieldData: c.fieldData as Record<string, unknown>,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
+  };
 }

@@ -7,6 +7,7 @@ import {
   notFoundResponse,
   createAuditLog,
 } from '@/lib/api-helpers';
+import { emitClipEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ clipId: string }> };
 
@@ -51,6 +52,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       newValue: data,
     });
 
+    emitClipEvent('updated', clipId, { storyId: clip.storyId });
+
     return successResponse(toFrontendClip(clip));
   } catch (e: any) {
     console.error('PATCH /api/clips/[id] error:', e);
@@ -73,6 +76,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       entityId: clipId,
       oldValue: { fileName: existing.fileName, storyId: existing.storyId },
     });
+
+    emitClipEvent('deleted', clipId, { storyId: existing.storyId });
 
     return successResponse({ deleted: true, clipId });
   } catch (e: any) {

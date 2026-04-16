@@ -5,9 +5,11 @@ import {
   successResponse,
   errorResponse,
   notFoundResponse,
-  createAuditLog,
   generateEntryId,
+  createAuditLog,
 } from '@/lib/api-helpers';
+import { getCurrentUserId } from '@/lib/get-current-user';
+import { emitEntryEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ rundownId: string }> };
 
@@ -36,7 +38,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { rundownId } = await params;
     const body = await req.json();
-    const { storyId, userId } = body;
+    const userId = await getCurrentUserId();
+    const { storyId } = body;
 
     if (!storyId) return errorResponse('storyId is required');
 
@@ -73,6 +76,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       entityId: entry.entryId,
       newValue: { rundownId, storyId },
     });
+
+    emitEntryEvent('created', entry.entryId, { rundownId });
 
     return successResponse(toFrontendEntry(entry), 201);
   } catch (e: any) {

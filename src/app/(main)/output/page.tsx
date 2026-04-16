@@ -13,10 +13,14 @@ import {
   X,
   FileText,
 } from 'lucide-react';
-import { useNewsForgeStore } from '@/store/useNewsForgeStore';
+import { useStories, useUpdateStory } from '@/hooks/useStories';
+import { useClips, useSendToEditorHub } from '@/hooks/useClips';
 import type { Story, StoryClip } from '@/types/types';
 import VideoPreview from '@/components/VideoPreview';
 import { formatDuration } from '@/utils/metadata';
+
+const EMPTY_ARRAY: any[] = [];
+
 
 /* ── SUB-COMPONENTS ── */
 const StatusBadge = ({ status }: { status: string }) => {
@@ -54,59 +58,101 @@ const PriorityBadge = ({ priority }: { priority: string | undefined }) => {
 
 /* ═══════════════════════ MAIN COMPONENT ═══════════════════════ */
 export default function OutputPage() {
-  /* ── store selectors ── */
-  const stories = useNewsForgeStore((s) => s.stories);
-  const storyClips = useNewsForgeStore((s) => s.storyClips);
-  const sendClipToEditorHub = useNewsForgeStore((s) => s.sendClipToEditorHub);
-  const updateStoryField = useNewsForgeStore((s) => s.updateStoryField);
+  /* ── API data via TanStack Query ── */
+  const { data: stories = EMPTY_ARRAY, isLoading: storiesLoading } = useStories();
+  const { data: allClips = EMPTY_ARRAY, isLoading: clipsLoading } = useClips();
+
+  const sendToEditorHubMutation = useSendToEditorHub();
+  const updateStoryMutation = useUpdateStory();
 
   /* ── local state ── */
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
   const [previewClip, setPreviewClip] = useState<StoryClip | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [clipEdits, setClipEdits] = useState<Record<string, { instructions: string; notes: string }>>({});
+  const [sendingClipId, setSendingClipId] = useState<string | null>(null);
+  const [sentClipIds, setSentClipIds] = useState<Set<string>>(new Set());
+  const [localStoryNotes, setLocalStoryNotes] = useState<string>('');
 
   /* ── derived data ── */
   const filteredStories = useMemo(() => {
     // Show stories that have clips (VIDEO ONLY page) or are submitted
     let filtered = stories.filter(
-      (s) => s.status === 'SUBMITTED' || s.status === 'EDITING' || s.status === 'DRAFT' || s.status === 'READY'
+      (s: any) => s.status === 'SUBMITTED' || s.status === 'EDITING' || s.status === 'DRAFT' || s.status === 'READY'
     );
     // Only show stories that have clips attached
-    filtered = filtered.filter((s) => storyClips.some((c) => c.storyId === s.storyId));
+    filtered = filtered.filter((s: any) => allClips.some((c: any) => c.storyId === s.storyId));
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(
-        (s) => s.title.toLowerCase().includes(q) || s.storyId.toLowerCase().includes(q)
+        (s: any) => s.title.toLowerCase().includes(q) || s.storyId.toLowerCase().includes(q)
       );
     }
     return filtered;
-  }, [stories, storyClips, searchQuery]);
+  }, [stories, allClips, searchQuery]);
 
   const selectedStory = useMemo(() => {
-    return stories.find((s) => s.storyId === selectedStoryId) || null;
+    return stories.find((s: any) => s.storyId === selectedStoryId) || null;
   }, [selectedStoryId, stories]);
 
   const selectedStoryClips = useMemo(() => {
     if (!selectedStoryId) return [];
-    return storyClips.filter((c) => c.storyId === selectedStoryId);
-  }, [selectedStoryId, storyClips]);
+    return allClips.filter((c: any) => c.storyId === selectedStoryId);
+  }, [selectedStoryId, allClips]);
 
   /* ── auto-select first story ── */
   useEffect(() => {
     if (filteredStories.length > 0 && !selectedStoryId) {
       setSelectedStoryId(filteredStories[0].storyId);
     }
-  }, [filteredStories, selectedStoryId]);
+    if (selectedStory) {
+      setLocalStoryNotes(selectedStory.editorialNotes || '');
+    }
+  }, [filteredStories, selectedStoryId, selectedStory]);
 
   /* ── handlers ── */
-  const handleSendToHub = (clipId: string) => {
+  const handleSendToHub = async (clipId: string) => {
     const edits = clipEdits[clipId] || { instructions: '', notes: '' };
-    sendClipToEditorHub(clipId, edits.instructions, edits.notes);
-    // Move story to EDITING if it was SUBMITTED
-    if (selectedStory && selectedStory.status === 'SUBMITTED') {
-      updateStoryField(selectedStory.storyId, 'status', 'EDITING');
+    setSendingClipId(clipId);
+
+    try {
+      await sendToEditorHubMutation.mutateAsync({
+        clipId,
+        data: {
+          editingInstructions: edits.instructions,
+          editorialNotes: edits.notes,
+        },
+      });
+
+      // Track this clip as sent
+      setSentClipIds((prev) => new Set([...prev, clipId]));
+
+      // Move story to EDITING if it was SUBMITTED
+      if (selectedStory && (selectedStory.status === 'SUBMITTED' || selectedStory.status === 'DRAFT')) {
+        await updateStoryMutation.mutateAsync({
+          storyId: selectedStory.storyId,
+          data: { status: 'EDITING' },
+        });
+      }
+    } catch (error: any) {
+      console.error('Failed to send to editor hub:', error.message);
+      alert('Failed to send to editor hub: ' + error.message);
+    } finally {
+      setSendingClipId(null);
+    }
+  };
+
+  const handleSaveStoryNotes = async () => {
+    if (!selectedStory) return;
+    try {
+      await updateStoryMutation.mutateAsync({
+        storyId: selectedStory.storyId,
+        data: { editorialNotes: localStoryNotes },
+      });
+      alert('Notes saved!');
+    } catch (error: any) {
+      alert('Failed to save notes: ' + error.message);
     }
   };
 
@@ -119,6 +165,18 @@ export default function OutputPage() {
       },
     }));
   };
+
+  /* ── Loading state ── */
+  if (storiesLoading || clipsLoading) {
+    return (
+      <div className="flex h-full bg-nf-bg items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-400">Loading production data...</p>
+        </div>
+      </div>
+    );
+  }
 
   /* ═══════════════════════ RENDER ═══════════════════════ */
   return (
@@ -153,9 +211,9 @@ export default function OutputPage() {
               </div>
             </div>
           ) : (
-            filteredStories.map((story) => {
+            filteredStories.map((story: any) => {
               const isSelected = selectedStoryId === story.storyId;
-              const clipCount = storyClips.filter((c) => c.storyId === story.storyId).length;
+              const clipCount = allClips.filter((c: any) => c.storyId === story.storyId).length;
               return (
                 <button
                   key={story.storyId}
@@ -230,7 +288,20 @@ export default function OutputPage() {
                 <div className="mt-4 flex flex-col gap-2">
                   <div className="p-3 bg-nf-panel/30 border border-nf-border rounded-md">
                     <span className="text-[10px] font-bold text-gray-500 block mb-1 uppercase tracking-wider">Production Notes</span>
-                    <p className="text-xs text-gray-400 italic">{selectedStory.editorialNotes || 'None'}</p>
+                    <textarea 
+                      data-testid="editorial-notes"
+                      value={localStoryNotes}
+                      onChange={(e) => setLocalStoryNotes(e.target.value)}
+                      placeholder="Add production notes for editor..."
+                      className="w-full h-20 bg-nf-bg border border-nf-border rounded p-2 text-xs text-gray-300 resize-none focus:outline-none focus:border-blue-500/50"
+                    />
+                    <button 
+                      data-testid="save-notes-btn"
+                      onClick={handleSaveStoryNotes}
+                      className="mt-2 w-full py-1.5 bg-nf-panel hover:bg-nf-border-highlight border border-nf-border rounded text-[10px] font-bold text-gray-400 transition-colors"
+                    >
+                      SAVE NOTES
+                    </button>
                   </div>
                 </div>
               </div>
@@ -250,8 +321,13 @@ export default function OutputPage() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-6">
-                    {selectedStoryClips.map((clip) => {
-                      const isSent = clip.status === 'EDITING' || clip.status === 'DONE';
+                    {selectedStoryClips.map((clip: any) => {
+                      const isSent = sentClipIds.has(clip.clipId) || 
+                        (clip.editingInstructions && clip.editingInstructions.trim() !== '') || 
+                        (clip.editorialNotes && clip.editorialNotes.trim() !== '') || 
+                        clip.status === 'EDITING' || 
+                        clip.status === 'DONE';
+                      const isSending = sendingClipId === clip.clipId;
                       return (
                         <div
                           key={clip.clipId}
@@ -297,7 +373,7 @@ export default function OutputPage() {
                               <label className="text-[10px] font-bold text-gray-500 mb-2 block uppercase">Editing Instructions</label>
                               {isSent ? (
                                 <div className="p-3 bg-nf-bg/50 border border-dashed border-nf-border rounded-md text-xs text-gray-400 italic">
-                                  &quot;{clipEdits[clip.clipId]?.instructions || 'No instructions provided.'}&quot;
+                                  &quot;{clip.editingInstructions || 'No instructions provided.'}&quot;
                                 </div>
                               ) : (
                                 <textarea
@@ -313,7 +389,7 @@ export default function OutputPage() {
                               <label className="text-[10px] font-bold text-gray-500 mb-2 block uppercase">Editorial Notes</label>
                               {isSent ? (
                                 <div className="p-3 bg-nf-bg/50 border border-dashed border-nf-border rounded-md text-xs text-gray-400 italic">
-                                  &quot;{clipEdits[clip.clipId]?.notes || 'No notes provided.'}&quot;
+                                  &quot;{clip.editorialNotes || 'No notes provided.'}&quot;
                                 </div>
                               ) : (
                                 <textarea
@@ -330,11 +406,13 @@ export default function OutputPage() {
                           {!isSent && (
                             <div className="px-4 pb-4">
                               <button
+                                data-testid="mark-available-btn"
                                 onClick={() => handleSendToHub(clip.clipId)}
-                                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+                                disabled={isSending}
+                                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-600/20 active:scale-95 disabled:opacity-50"
                               >
                                 <Send size={15} />
-                                SEND TO EDITOR HUB
+                                {isSending ? 'SENDING...' : 'SEND TO EDITOR HUB'}
                               </button>
                             </div>
                           )}
@@ -381,8 +459,8 @@ export default function OutputPage() {
             <div className="aspect-video bg-black relative group flex flex-col items-center justify-center">
               <VideoPreview
                 fileUrl={previewClip.fileUrl}
-                fileName={previewClip.fileName}
-                duration={previewClip.duration}
+                proxyUrl={previewClip.proxyUrl}
+                thumbnailUrl={previewClip.thumbnailUrl}
                 className="h-full w-full"
               />
             </div>

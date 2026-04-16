@@ -1,3 +1,4 @@
+// src/app/api/rundowns/route.ts
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { toFrontendRundown } from '@/lib/db-helpers';
@@ -7,6 +8,7 @@ import {
   createAuditLog,
   generateRundownId,
 } from '@/lib/api-helpers';
+import { emitRundownEvent } from '@/lib/api-events';
 
 // GET /api/rundowns — List rundowns
 export async function GET(req: NextRequest) {
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/rundowns — Create rundown
+// POST /api/rundowns — Create rundown (upsert: return existing if duplicate)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -41,6 +43,20 @@ export async function POST(req: NextRequest) {
     if (!date) return errorResponse('date is required');
     if (!broadcastTime) return errorResponse('broadcastTime is required');
 
+    // Check if rundown already exists for this date + broadcastTime
+    const existing = await prisma.rundown.findFirst({
+      where: {
+        date,
+        broadcastTime,
+      },
+    });
+
+    if (existing) {
+      // Return existing rundown instead of failing with unique constraint
+      return successResponse(toFrontendRundown(existing), 200);
+    }
+
+    // Create new rundown
     const rundownId = generateRundownId();
 
     const rundown = await prisma.rundown.create({
@@ -60,6 +76,8 @@ export async function POST(req: NextRequest) {
       entityId: rundownId,
       newValue: { title, date, broadcastTime },
     });
+
+    emitRundownEvent('created', rundown.rundownId);
 
     return successResponse(toFrontendRundown(rundown), 201);
   } catch (e: any) {

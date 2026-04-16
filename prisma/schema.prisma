@@ -93,6 +93,9 @@ model User {
   claimedClips    StoryClip[] @relation("ClipClaimer")
   auditLogs       AuditLog[]
 
+  createdCgItems CgItem[] @relation("CgCreator")
+  updatedCgItems CgItem[] @relation("CgUpdater")
+
   @@map("users")
 }
 
@@ -141,6 +144,8 @@ model Story {
   clips          StoryClip[]
   rundownEntries RundownEntry[]
 
+  cgItems          CgItem[]
+
   @@map("stories")
 }
 
@@ -150,7 +155,8 @@ model StoryClip {
   fileName         String
   originalFileName String
   fileUrl          String?
-  fileType         String     @default("VIDEO/MP4")
+  fileSize         Int?
+  fileType         String     @default("video/mp4")
   displayLabel     String     @default("")
   duration         String?
   status           ClipStatus @default(PENDING)
@@ -163,13 +169,15 @@ model StoryClip {
   editorialNotes      String @default("")
 
   // Future fields (Phase 3.5/3.6)
-  codec      String?
-  resolution String?
-  fps        String?
-  proxyUrl   String?
+  codec       String?
+  resolution  String?
+  fps         String?
+  proxyUrl    String?
+  thumbnailUrl String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
 
   // Relations
   story   Story @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
@@ -212,6 +220,8 @@ model RundownEntry {
   rundown Rundown @relation(fields: [rundownId], references: [rundownId], onDelete: Cascade)
   story   Story   @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
 
+  cgItems       CgItem[]
+
   @@map("rundown_entries")
 }
 
@@ -230,4 +240,43 @@ model AuditLog {
   user User? @relation(fields: [userId], references: [userId])
 
   @@map("audit_logs")
+}
+
+// ─── CG ITEMS (Phase CG-1 + CG-2) ───────────────────────
+
+enum CgStatus {
+  DRAFT
+  READY
+  ON_AIR
+
+  @@map("cg_status")
+}
+
+model CgItem {
+  cgItemId        String   @id
+  storyId         String
+  entryId         String?
+  templateName    String   @default("")
+  concept         String   @default("")
+  variant         String   @default("")
+  dataElementName String   @default("")
+  dataElementId   String?
+  fieldData       Json     @default("{}")
+  mosObjId        String?
+  mosObjXml       String?
+  orderIndex      Int      @default(0)
+  channel         String   @default("GFX1")
+  layer           String   @default("FULL")
+  status          CgStatus @default(DRAFT)
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  story   Story         @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
+  entry   RundownEntry? @relation(fields: [entryId], references: [entryId], onDelete: SetNull)
+  creator User          @relation("CgCreator", fields: [createdBy], references: [userId])
+  updater User?         @relation("CgUpdater", fields: [updatedBy], references: [userId])
+
+  @@map("cg_items")
 }

@@ -7,6 +7,8 @@ import {
   notFoundResponse,
   createAuditLog,
 } from '@/lib/api-helpers';
+import { getCurrentUserId } from '@/lib/get-current-user';
+import { emitStoryEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ storyId: string }> };
 
@@ -28,6 +30,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   try {
     const { storyId } = await params;
     const body = await req.json();
+    const userId = await getCurrentUserId();
 
     const existing = await prisma.story.findUnique({ where: { storyId } });
     if (!existing) return notFoundResponse('Story', storyId);
@@ -59,19 +62,21 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (body.polishedScript !== undefined) {
       data.isPolished = true;
       data.polishedAt = new Date();
-      if (body.polishedBy) data.polishedBy = body.polishedBy;
+      data.polishedBy = userId;
     }
 
     const story = await prisma.story.update({ where: { storyId }, data });
 
     await createAuditLog({
-      userId: body.userId || body.polishedBy || null,
+      userId,
       action: 'UPDATE',
       entity: 'STORY',
       entityId: storyId,
       oldValue: { status: existing.status, format: existing.format },
       newValue: data,
     });
+
+    emitStoryEvent('updated', storyId);
 
     return successResponse(toFrontendStory(story));
   } catch (e: any) {
@@ -86,15 +91,19 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     const { storyId } = await params;
     const existing = await prisma.story.findUnique({ where: { storyId } });
     if (!existing) return notFoundResponse('Story', storyId);
-
+    
+    const userId = await getCurrentUserId();
     await prisma.story.delete({ where: { storyId } });
 
     await createAuditLog({
+      userId,
       action: 'DELETE',
       entity: 'STORY',
       entityId: storyId,
       oldValue: { title: existing.title },
     });
+
+    emitStoryEvent('deleted', storyId);
 
     return successResponse({ deleted: true, storyId });
   } catch (e: any) {

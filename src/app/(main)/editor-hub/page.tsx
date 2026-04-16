@@ -2,25 +2,32 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import {
     Pen, Film, Eye, Clock, CheckCircle, AlertCircle,
     Play, FileText, Send, X, Layers, Search
 } from 'lucide-react';
-import { useNewsForgeStore } from '@/store/useNewsForgeStore';
+import { useStories, useUpdateStory, useSendToRundown } from '@/hooks/useStories';
+import { useClips, useClaimClip, useCompleteClip } from '@/hooks/useClips';
+import { useRundowns, useCreateRundown } from '@/hooks/useRundowns';
 import type { Story, StoryClip } from '@/types/types';
 import VideoPreview from '@/components/VideoPreview';
 import { formatDuration, generateAllTimeSlots } from '@/utils/metadata';
 
+const EMPTY_ARRAY: any[] = [];
+
+
 export default function EditorHubPage() {
-    /* ── store selectors ── */
-    const stories = useNewsForgeStore((s) => s.stories);
-    const storyClips = useNewsForgeStore((s) => s.storyClips);
-    const rundowns = useNewsForgeStore((s) => s.rundowns);
-    const claimClip = useNewsForgeStore((s) => s.claimClip);
-    const completeClip = useNewsForgeStore((s) => s.completeClip);
-    const sendToRundown = useNewsForgeStore((s) => s.sendToRundown);
-    const updateStoryField = useNewsForgeStore((s) => s.updateStoryField);
-    const savePolishedScript = useNewsForgeStore((s) => s.savePolishedScript);
+    /* ── API data via TanStack Query ── */
+    const { data: stories = EMPTY_ARRAY, isLoading: storiesLoading } = useStories();
+    const { data: allClips = EMPTY_ARRAY, isLoading: clipsLoading } = useClips();
+    const { data: dbRundowns = EMPTY_ARRAY } = useRundowns();
+
+    const updateStoryMutation = useUpdateStory();
+    const claimClipMutation = useClaimClip();
+    const completeClipMutation = useCompleteClip();
+    const sendToRundownMutation = useSendToRundown();
+    const createRundownMutation = useCreateRundown();
 
     /* ── local state ── */
     const [editorMode, setEditorMode] = useState<'video' | 'copy'>('video');
@@ -29,30 +36,33 @@ export default function EditorHubPage() {
     const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
     const [isRundownModalOpen, setIsRundownModalOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [isClaiming, setIsClaiming] = useState(false);
+    const [isCompleting, setIsCompleting] = useState(false);
+    const [isSendingToRundown, setIsSendingToRundown] = useState(false);
 
     /* ── rundown modal: 48 bulletins ── */
     const today = new Date().toISOString().split('T')[0];
 
     const allBulletins = useMemo(() => {
         const slots = generateAllTimeSlots(today);
-        const existing = rundowns.filter((r) => r.date === today);
-        const merged = slots.map((slot) => {
-            const match = existing.find((r) => r.rundownId === slot.rundownId);
+        const existing = dbRundowns.filter((r: any) => r.date === today);
+        const merged = slots.map((slot: any) => {
+            const match = existing.find((r: any) => r.rundownId === slot.rundownId);
             return match ? { ...slot, ...match } : slot;
         });
-        existing.forEach((ex) => {
-            if (!merged.find((m) => m.rundownId === ex.rundownId)) {
+        existing.forEach((ex: any) => {
+            if (!merged.find((m: any) => m.rundownId === ex.rundownId)) {
                 merged.push(ex as any);
             }
         });
-        merged.sort((a, b) => a.broadcastTime.localeCompare(b.broadcastTime));
+        merged.sort((a: any, b: any) => a.broadcastTime.localeCompare(b.broadcastTime));
         return merged;
-    }, [today, rundowns]);
+    }, [today, dbRundowns]);
 
     const filteredBulletins = useMemo(() => {
         if (!searchQuery.trim()) return allBulletins;
         const q = searchQuery.toLowerCase().trim();
-        return allBulletins.filter((b) =>
+        return allBulletins.filter((b: any) =>
             b.title.toLowerCase().includes(q) || b.broadcastTime.includes(q)
         );
     }, [allBulletins, searchQuery]);
@@ -67,15 +77,15 @@ export default function EditorHubPage() {
 
     /* ── filtered clips (VIDEO tab) ── */
     const filteredClips = useMemo(() => {
-        return storyClips.filter((c) => {
+        return allClips.filter((c: any) => {
             if (activeFilter === 'ALL') return true;
             return c.status === activeFilter;
         });
-    }, [storyClips, activeFilter]);
+    }, [allClips, activeFilter]);
 
     /* ── filtered stories (COPY tab) ── */
     const filteredCopyStories = useMemo(() => {
-        return stories.filter((s) => {
+        return stories.filter((s: any) => {
             if (s.storyId.startsWith('SYS-')) return false;
             if (activeFilter === 'ALL') return true;
             if (activeFilter === 'PENDING') return s.status === 'SUBMITTED' || s.status === 'DRAFT';
@@ -88,27 +98,27 @@ export default function EditorHubPage() {
     /* ── selected items ── */
     const selectedClip = useMemo(() => {
         if (editorMode !== 'video' || !selectedClipId) return null;
-        return storyClips.find((c) => c.clipId === selectedClipId) || null;
-    }, [storyClips, selectedClipId, editorMode]);
+        return allClips.find((c: any) => c.clipId === selectedClipId) || null;
+    }, [allClips, selectedClipId, editorMode]);
 
     const selectedStory = useMemo(() => {
         if (editorMode !== 'copy' || !selectedStoryId) return null;
-        return stories.find((s) => s.storyId === selectedStoryId) || null;
+        return stories.find((s: any) => s.storyId === selectedStoryId) || null;
     }, [stories, selectedStoryId, editorMode]);
 
     /* ── auto-select first item ── */
     useEffect(() => {
         if (editorMode === 'video' && filteredClips.length > 0) {
-            if (!selectedClipId || !storyClips.find((c) => c.clipId === selectedClipId)) {
+            if (!selectedClipId || !allClips.find((c: any) => c.clipId === selectedClipId)) {
                 setSelectedClipId(filteredClips[0].clipId);
             }
         }
         if (editorMode === 'copy' && filteredCopyStories.length > 0) {
-            if (!selectedStoryId || !stories.find((s) => s.storyId === selectedStoryId)) {
+            if (!selectedStoryId || !stories.find((s: any) => s.storyId === selectedStoryId)) {
                 setSelectedStoryId(filteredCopyStories[0].storyId);
             }
         }
-    }, [editorMode, filteredClips, filteredCopyStories, selectedClipId, selectedStoryId, storyClips, stories]);
+    }, [editorMode, filteredClips, filteredCopyStories, selectedClipId, selectedStoryId, allClips, stories]);
 
     /* ── helpers ── */
     const getStatusStyle = (status: string) => {
@@ -126,33 +136,120 @@ export default function EditorHubPage() {
     const kannadaFont = { fontFamily: "'Noto Sans Kannada', sans-serif" };
 
     const getStoryTitle = (storyId: string) => {
-        const story = stories.find((s) => s.storyId === storyId);
+        const story = stories.find((s: any) => s.storyId === storyId);
         return story?.title || 'Unknown Story';
     };
+    
+    const { userId } = useAuth();
 
     /* ── actions ── */
-    const handleClaim = () => {
-        if (selectedClip) {
-            claimClip(selectedClip.clipId, 'USR-001');
+    const handleClaim = async () => {
+        if (!selectedClip) return;
+        setIsClaiming(true);
+        try {
+            await claimClipMutation.mutateAsync({
+                clipId: selectedClip.clipId,
+                userId: userId!,
+            });
+        } catch (error: any) {
+            console.error('Failed to claim clip:', error.message);
+            alert('Failed to claim clip: ' + error.message);
+        } finally {
+            setIsClaiming(false);
         }
     };
 
-    const handleComplete = (label: string) => {
-        if (selectedClip && label.trim()) {
-            completeClip(selectedClip.clipId, label.trim());
-        } else {
+    const handleComplete = async (label: string) => {
+        if (!selectedClip || !label.trim()) {
             alert('Please enter a display label.');
+            return;
+        }
+        setIsCompleting(true);
+        try {
+            await completeClipMutation.mutateAsync({
+                clipId: selectedClip.clipId,
+                displayLabel: label.trim(),
+                userId: userId!,
+            });
+        } catch (error: any) {
+            console.error('Failed to complete clip:', error.message);
+            alert('Failed to complete clip: ' + error.message);
+        } finally {
+            setIsCompleting(false);
         }
     };
 
-    const handleSendToRundown = (rundownId: string) => {
+    const handleSavePolishedScript = async (script: string) => {
         if (!selectedStory) return;
-        console.log('=== SEND TO RUNDOWN ===');
-        console.log('Story:', selectedStory.storyId, '→ Rundown:', rundownId);
-        sendToRundown(selectedStory.storyId, rundownId);
-        setIsRundownModalOpen(false);
-        setSearchQuery('');
+        try {
+            await updateStoryMutation.mutateAsync({
+                storyId: selectedStory.storyId,
+                data: {
+                    anchorScript: script,
+                    polishedScript: script,
+                    isPolished: true,
+                },
+            });
+        } catch (error: any) {
+            console.error('Failed to save script:', error.message);
+        }
     };
+
+    const handleSendToRundown = async (id: string) => {
+        if (!selectedStory) return;
+        setIsSendingToRundown(true);
+        console.log('=== SEND TO RUNDOWN ===');
+        console.log('Story:', selectedStory.storyId, '→ Rundown:', id);
+
+        let finalRundownId = id;
+
+        try {
+            // Check if rundown exists in DB
+            const existsInDb = dbRundowns.find((r: any) => r.rundownId === id);
+
+            if (!existsInDb) {
+                // Auto-generated slot — create rundown in DB first
+                const bulletinData = allBulletins.find((b: any) => b.rundownId === id);
+                if (bulletinData) {
+                    const created = await createRundownMutation.mutateAsync({
+                        title: bulletinData.title,
+                        date: bulletinData.date || today,
+                        broadcastTime: bulletinData.broadcastTime,
+                        plannedDuration: bulletinData.plannedDuration || '00:30:00',
+                    });
+                    finalRundownId = created.rundownId;
+                }
+            }
+
+            // Now send story to rundown
+            await sendToRundownMutation.mutateAsync({
+                storyId: selectedStory.storyId,
+                data: {
+                    rundownId: finalRundownId,
+                },
+            });
+
+            setIsRundownModalOpen(false);
+            setSearchQuery('');
+        } catch (error: any) {
+            console.error('Failed to send to rundown:', error.message);
+            alert('Failed to send to rundown: ' + error.message);
+        } finally {
+            setIsSendingToRundown(false);
+        }
+    };
+
+    /* ── Loading state ── */
+    if (storiesLoading || clipsLoading) {
+        return (
+            <div className="flex h-full bg-nf-bg items-center justify-center">
+                <div className="text-center">
+                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    <p className="text-sm text-gray-400">Loading editor hub...</p>
+                </div>
+            </div>
+        );
+    }
 
     /* ═══════════════════════ RENDER ═══════════════════════ */
     return (
@@ -166,12 +263,14 @@ export default function EditorHubPage() {
                     </div>
                     <div className="flex gap-1">
                         <button
+                            data-testid="video-editor-tab"
                             onClick={() => { setEditorMode('video'); setActiveFilter('ALL'); }}
                             className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${editorMode === 'video' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-nf-panel text-gray-500 hover:text-gray-300'}`}
                         >
                             Video Editor
                         </button>
                         <button
+                            data-testid="copy-editor-tab"
                             onClick={() => { setEditorMode('copy'); setActiveFilter('ALL'); }}
                             className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${editorMode === 'copy' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-nf-panel text-gray-500 hover:text-gray-300'}`}
                         >
@@ -199,7 +298,7 @@ export default function EditorHubPage() {
                         filteredClips.length === 0 ? (
                             <div className="p-6 text-center text-gray-600 text-xs">No clips found</div>
                         ) : (
-                            filteredClips.map((clip) => (
+                            filteredClips.map((clip: any) => (
                                 <button
                                     key={clip.clipId}
                                     onClick={() => setSelectedClipId(clip.clipId)}
@@ -237,7 +336,7 @@ export default function EditorHubPage() {
                         filteredCopyStories.length === 0 ? (
                             <div className="p-6 text-center text-gray-600 text-xs">No stories found</div>
                         ) : (
-                            filteredCopyStories.map((story) => (
+                            filteredCopyStories.map((story: any) => (
                                 <button
                                     key={story.storyId}
                                     onClick={() => setSelectedStoryId(story.storyId)}
@@ -266,7 +365,7 @@ export default function EditorHubPage() {
             <div className="flex-1 flex flex-col overflow-hidden bg-nf-bg">
                 {/* ── VIDEO EDITOR ── */}
                 {editorMode === 'video' && selectedClip ? (() => {
-                    const story = stories.find((s) => s.storyId === selectedClip.storyId);
+                    const story = stories.find((s: any) => s.storyId === selectedClip.storyId);
                     return (
                         <>
                             {/* header */}
@@ -355,8 +454,8 @@ export default function EditorHubPage() {
                                         <div className="space-y-6">
                                             <VideoPreview
                                                 fileUrl={selectedClip.fileUrl}
-                                                fileName={selectedClip.fileName}
-                                                duration={selectedClip.duration}
+                                                proxyUrl={selectedClip.proxyUrl}
+                                                thumbnailUrl={selectedClip.thumbnailUrl}
                                                 className="h-full w-full"
                                             />
 
@@ -381,13 +480,15 @@ export default function EditorHubPage() {
                                                             </p>
                                                         </div>
                                                         <button
+                                                            data-testid="complete-btn"
                                                             onClick={() => {
                                                                 const el = document.getElementById('clipDisplayLabel') as HTMLInputElement;
                                                                 handleComplete(el?.value || '');
                                                             }}
-                                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-lg text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
+                                                            disabled={isCompleting}
+                                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-lg text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
                                                         >
-                                                            <CheckCircle size={14} /> Finalize & Handover
+                                                            <CheckCircle size={14} /> {isCompleting ? 'Completing...' : 'Finalize & Handover'}
                                                         </button>
                                                     </div>
                                                 </div>
@@ -445,10 +546,12 @@ export default function EditorHubPage() {
                             <div className="h-16 shrink-0 bg-nf-surface border-t border-nf-border flex items-center justify-end px-8">
                                 {selectedClip.status === 'PENDING' && (
                                     <button
+                                        data-testid="claim-btn"
                                         onClick={handleClaim}
-                                        className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black px-10 py-3 rounded-lg shadow-xl shadow-blue-500/20 uppercase tracking-widest transition-all"
+                                        disabled={isClaiming}
+                                        className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black px-10 py-3 rounded-lg shadow-xl shadow-blue-500/20 uppercase tracking-widest transition-all disabled:opacity-50"
                                     >
-                                        Claim Processing Task
+                                        {isClaiming ? 'Claiming...' : 'Claim Processing Task'}
                                     </button>
                                 )}
                             </div>
@@ -506,12 +609,11 @@ export default function EditorHubPage() {
                                     </div>
                                     <div className="flex-1 bg-nf-panel border border-nf-border rounded-2xl p-6 shadow-2xl">
                                         <textarea
+                                            data-testid="polished-script-editor"
                                             value={selectedStory.anchorScript || selectedStory.polishedScript || ''}
                                             onChange={(e) => {
                                                 if (selectedStory.status === 'READY' || selectedStory.status === 'APPROVED') return;
-                                                updateStoryField(selectedStory.storyId, 'anchorScript', e.target.value);
-                                                // Also save as polished script
-                                                savePolishedScript(selectedStory.storyId, e.target.value, 'USR-001');
+                                                handleSavePolishedScript(e.target.value);
                                             }}
                                             className="w-full h-full bg-transparent text-[22px] font-medium text-gray-100 placeholder-gray-800 outline-none resize-none leading-snug"
                                             placeholder="Write anchor script here... (polished script area — always starts empty)"
@@ -525,14 +627,22 @@ export default function EditorHubPage() {
                                 <div className="h-16 shrink-0 bg-nf-surface border-t border-nf-border flex items-center justify-end px-10">
                                     {selectedStory.status !== 'READY' && selectedStory.status !== 'APPROVED' && (
                                         <button
-                                            onClick={() => {
+                                            onClick={async () => {
                                                 if (selectedStory.status === 'SUBMITTED' || selectedStory.status === 'DRAFT') {
-                                                    updateStoryField(selectedStory.storyId, 'status', 'EDITING');
+                                                    try {
+                                                        await updateStoryMutation.mutateAsync({
+                                                            storyId: selectedStory.storyId,
+                                                            data: { status: 'EDITING' },
+                                                        });
+                                                    } catch (error: any) {
+                                                        console.error('Failed to unlock story:', error.message);
+                                                    }
                                                 } else {
                                                     setIsRundownModalOpen(true);
                                                 }
                                             }}
-                                            className={`text-[11px] font-black px-10 py-3 rounded-lg shadow-xl uppercase tracking-widest transition-all flex items-center gap-2 ${selectedStory.status === 'SUBMITTED' || selectedStory.status === 'DRAFT' ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'} text-white`}
+                                            disabled={updateStoryMutation.isPending}
+                                            className={`text-[11px] font-black px-10 py-3 rounded-lg shadow-xl uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-50 ${selectedStory.status === 'SUBMITTED' || selectedStory.status === 'DRAFT' ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'} text-white`}
                                         >
                                             <Send size={14} />
                                             {selectedStory.status === 'SUBMITTED' || selectedStory.status === 'DRAFT' ? 'Unlock for Editing' : 'Send to Rundown'}
@@ -591,11 +701,12 @@ export default function EditorHubPage() {
 
                         {/* bulletin list */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                            {filteredBulletins.map((rd) => (
+                            {filteredBulletins.map((rd: any) => (
                                 <button
                                     key={rd.rundownId}
                                     onClick={() => handleSendToRundown(rd.rundownId)}
-                                    className="w-full text-left p-4 bg-nf-panel/30 hover:bg-blue-600/10 border border-nf-border/50 hover:border-blue-500/50 rounded-2xl transition-all group"
+                                    disabled={isSendingToRundown}
+                                    className="w-full text-left p-4 bg-nf-panel/30 hover:bg-blue-600/10 border border-nf-border/50 hover:border-blue-500/50 rounded-2xl transition-all group disabled:opacity-50"
                                 >
                                     <div className="flex items-center justify-between">
                                         <div className="font-bold text-gray-200 uppercase tracking-tight group-hover:text-blue-400 transition-colors">

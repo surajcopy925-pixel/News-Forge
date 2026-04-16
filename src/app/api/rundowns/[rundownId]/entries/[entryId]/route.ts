@@ -7,6 +7,7 @@ import {
   notFoundResponse,
   createAuditLog,
 } from '@/lib/api-helpers';
+import { emitEntryEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ rundownId: string; entryId: string }> };
 
@@ -47,6 +48,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       newValue: data,
     });
 
+    emitEntryEvent('updated', entryId, { rundownId: entry.rundownId });
+
     return successResponse(toFrontendEntry(entry));
   } catch (e: any) {
     console.error('PATCH /api/rundowns/[id]/entries/[id] error:', e);
@@ -85,6 +88,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       entityId: entryId,
       oldValue: { rundownId, storyId: existing.storyId },
     });
+
+    emitEntryEvent('deleted', entryId, { rundownId });
 
     return successResponse({ deleted: true, entryId });
   } catch (e: any) {

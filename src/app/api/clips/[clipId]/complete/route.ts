@@ -8,6 +8,8 @@ import {
   conflictResponse,
   createAuditLog,
 } from '@/lib/api-helpers';
+import { getCurrentUserId } from '@/lib/get-current-user';
+import { emitClipEvent } from '@/lib/api-events';
 
 type Params = { params: Promise<{ clipId: string }> };
 
@@ -16,7 +18,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { clipId } = await params;
     const body = await req.json();
-    const { displayLabel, userId } = body;
+    const userId = await getCurrentUserId();
+    const { displayLabel } = body;
 
     if (!displayLabel) return errorResponse('displayLabel is required');
 
@@ -40,13 +43,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     await createAuditLog({
-      userId: userId || clip.claimedBy || null,
+      userId,
       action: 'COMPLETE',
       entity: 'CLIP',
       entityId: clipId,
       oldValue: { status: 'EDITING' },
       newValue: { status: 'DONE', displayLabel },
     });
+
+    emitClipEvent('updated', clipId, { storyId: updated.storyId });
 
     return successResponse(toFrontendClip(updated));
   } catch (e: any) {

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { toFrontendStory } from '@/lib/db-helpers';
+import { toFrontendStory, toPrismaFormat, toPrismaStatus } from '@/lib/db-helpers';
 import {
   successResponse,
   errorResponse,
@@ -8,6 +8,8 @@ import {
   generateStoryId,
   generateSlug,
 } from '@/lib/api-helpers';
+import { getCurrentUserId } from '@/lib/get-current-user';
+import { emitStoryEvent } from '@/lib/api-events';
 
 // GET /api/stories — List stories
 export async function GET(req: NextRequest) {
@@ -45,15 +47,15 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/stories — Create story
+// POST /api/stories — Create story (FIXED format/status conversion)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const userId = await getCurrentUserId();
     const {
       title,
       format,
       content,
-      createdBy,
       category,
       location,
       source,
@@ -65,7 +67,7 @@ export async function POST(req: NextRequest) {
     } = body;
 
     if (!title) return errorResponse('Title is required');
-    if (!createdBy) return errorResponse('createdBy is required');
+    if (!userId) return errorResponse('userId is required');
 
     const storyId = generateStoryId(language);
     const slug = generateSlug(title);
@@ -75,13 +77,13 @@ export async function POST(req: NextRequest) {
         storyId,
         title,
         slug,
-        format: format || 'EMPTY',
-        status: status || 'DRAFT',
+        format: toPrismaFormat(format || '') as any,       // ← FIXED
+        status: toPrismaStatus(status || 'DRAFT') as any,  // ← FIXED
         content: content || '',
         rawScript: content || '',
         editorialNotes: editorialNotes || '',
         plannedDuration: plannedDuration || '00:00:00',
-        createdBy,
+        createdBy: userId,
         category: category || null,
         location: location || null,
         source: source || null,
@@ -91,12 +93,14 @@ export async function POST(req: NextRequest) {
     });
 
     await createAuditLog({
-      userId: createdBy,
+      userId,
       action: 'CREATE',
       entity: 'STORY',
       entityId: storyId,
       newValue: { title, format, status: story.status },
     });
+
+    emitStoryEvent('created', story.storyId);
 
     return successResponse(toFrontendStory(story), 201);
   } catch (e: any) {

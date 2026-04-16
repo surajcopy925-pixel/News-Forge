@@ -22,6 +22,8 @@ const TABS = [
   { id: 'settings', label: 'settings', icon: Settings, href: '/settings' },
 ];
 
+import UserMenu from './UserMenu';
+
 export default function TopNav() {
   const pathname = usePathname();
   const [time, setTime] = useState('');
@@ -111,16 +113,11 @@ export default function TopNav() {
         </button>
 
         {/* User Information Profile */}
-        <div className="flex items-center gap-3 pl-3 border-l border-nf-border ml-1">
-          <div className="flex flex-col items-end leading-none gap-1">
-            <span className="text-xs font-semibold text-gray-200">Priya Sharma</span>
-            <span className="text-[10px] text-blue-400 font-medium tracking-tight">Senior Producer</span>
-          </div>
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg ring-1 ring-white/10 group cursor-pointer hover:ring-white/20 transition-all">
-            <span className="text-white text-[10px] font-bold">PS</span>
-          </div>
+        <div className="pl-3 border-l border-nf-border ml-1">
+          <UserMenu />
         </div>
       </div>
     </nav>
   );
 }
+
