@@ -1,5 +1,6 @@
 // src/lib/storage.ts
-import fs from 'fs';
+import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
@@ -13,23 +14,42 @@ export const UPLOAD_DIRS = {
 export type UploadCategory = keyof typeof UPLOAD_DIRS;
 
 /** Create upload directories if they don't exist */
-export function ensureUploadDirs(): void {
-  Object.values(UPLOAD_DIRS).forEach((dir) => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+export async function ensureUploadDirs(): Promise<void> {
+  for (const dir of Object.values(UPLOAD_DIRS)) {
+    try {
+      if (!fsSync.existsSync(dir)) {
+        await fs.mkdir(dir, { recursive: true });
+        console.log(`[storage] Created directory: ${dir}`);
+      }
+    } catch (err) {
+      console.error(`[storage] Failed to create directory ${dir}:`, err);
+      // Don't throw here, let saveFile fail if necessary
     }
-  });
+  }
 }
 
 /** Save a file buffer to disk, return metadata */
 export async function saveFile(
-  buffer: Buffer,
+  buffer: Buffer | Uint8Array,
   category: UploadCategory,
   fileName: string
 ): Promise<{ filePath: string; fileUrl: string; fileSize: number }> {
-  ensureUploadDirs();
+  // Defensive: check category and filename
+  if (!UPLOAD_DIRS[category]) {
+    throw new Error(`Invalid upload category: ${category}`);
+  }
+
+  await ensureUploadDirs();
   const filePath = path.join(UPLOAD_DIRS[category], fileName);
-  fs.writeFileSync(filePath, buffer);
+  
+  // Security: prevent path traversal
+  if (!filePath.startsWith(UPLOAD_ROOT)) {
+    throw new Error('Invalid file path');
+  }
+
+  console.log(`[storage] Writing file: ${filePath} (${buffer.length} bytes)`);
+  await fs.writeFile(filePath, buffer);
+  
   return {
     filePath,
     fileUrl: `/api/files/${category}/${fileName}`,
@@ -38,11 +58,15 @@ export async function saveFile(
 }
 
 /** Delete a file from disk */
-export function deleteFile(category: UploadCategory, fileName: string): boolean {
+export async function deleteFile(category: UploadCategory, fileName: string): Promise<boolean> {
   const filePath = path.join(UPLOAD_DIRS[category], fileName);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-    return true;
+  try {
+    if (fsSync.existsSync(filePath)) {
+      await fs.unlink(filePath);
+      return true;
+    }
+  } catch (err) {
+    console.error(`[storage] Delete failed for ${filePath}:`, err);
   }
   return false;
 }
@@ -52,13 +76,13 @@ export function getFilePath(category: string, fileName: string): string | null {
   const filePath = path.join(UPLOAD_ROOT, category, fileName);
   // Security: prevent path traversal attacks
   if (!filePath.startsWith(UPLOAD_ROOT)) return null;
-  if (!fs.existsSync(filePath)) return null;
+  if (!fsSync.existsSync(filePath)) return null;
   return filePath;
 }
 
 /** Get file stats */
-export function getFileStats(category: string, fileName: string): fs.Stats | null {
+export async function getFileStats(category: string, fileName: string): Promise<fsSync.Stats | null> {
   const filePath = getFilePath(category, fileName);
   if (!filePath) return null;
-  return fs.statSync(filePath);
+  return await fs.stat(filePath);
 }

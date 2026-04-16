@@ -1,7 +1,7 @@
 // src/app/(main)/editor-hub/page.tsx
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import {
     Pen, Film, Eye, Clock, CheckCircle, AlertCircle,
@@ -39,6 +39,10 @@ export default function EditorHubPage() {
     const [isClaiming, setIsClaiming] = useState(false);
     const [isCompleting, setIsCompleting] = useState(false);
     const [isSendingToRundown, setIsSendingToRundown] = useState(false);
+
+    /* ── local script draft (decoupled from API to allow smooth typing) ── */
+    const [scriptDraft, setScriptDraft] = useState('');
+    const scriptFocused = useRef(false);
 
     /* ── rundown modal: 48 bulletins ── */
     const today = new Date().toISOString().split('T')[0];
@@ -119,6 +123,24 @@ export default function EditorHubPage() {
             }
         }
     }, [editorMode, filteredClips, filteredCopyStories, selectedClipId, selectedStoryId, allClips, stories]);
+
+    /* ── sync draft when selected story changes (skip if textarea focused) ── */
+    useEffect(() => {
+        if (!scriptFocused.current) {
+            setScriptDraft(selectedStory?.anchorScript || selectedStory?.polishedScript || '');
+        }
+    }, [selectedStory?.storyId, selectedStory?.anchorScript, selectedStory?.polishedScript]);
+
+    /* ── save on blur ── */
+    const handleScriptBlur = useCallback(async () => {
+        scriptFocused.current = false;
+        if (!selectedStory) return;
+        if (selectedStory.status === 'READY' || selectedStory.status === 'APPROVED') return;
+        const current = selectedStory.anchorScript || selectedStory.polishedScript || '';
+        if (scriptDraft === current) return; // no change — skip API call
+        await handleSavePolishedScript(scriptDraft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedStory, scriptDraft]);
 
     /* ── helpers ── */
     const getStatusStyle = (status: string) => {
@@ -610,11 +632,13 @@ export default function EditorHubPage() {
                                     <div className="flex-1 bg-nf-panel border border-nf-border rounded-2xl p-6 shadow-2xl">
                                         <textarea
                                             data-testid="polished-script-editor"
-                                            value={selectedStory.anchorScript || selectedStory.polishedScript || ''}
+                                            value={scriptDraft}
                                             onChange={(e) => {
                                                 if (selectedStory.status === 'READY' || selectedStory.status === 'APPROVED') return;
-                                                handleSavePolishedScript(e.target.value);
+                                                setScriptDraft(e.target.value);
                                             }}
+                                            onFocus={() => { scriptFocused.current = true; }}
+                                            onBlur={handleScriptBlur}
                                             className="w-full h-full bg-transparent text-[22px] font-medium text-gray-100 placeholder-gray-800 outline-none resize-none leading-snug"
                                             placeholder="Write anchor script here... (polished script area — always starts empty)"
                                             style={kannadaFont}

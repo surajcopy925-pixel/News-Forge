@@ -101,12 +101,12 @@ export default function InputPage() {
         setFormPriority(story.priority || 'NORMAL');
       }
     } else {
-      resetForm();
+      clearFormFields();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStoryId, stories]);
 
-  const resetForm = () => {
+  const clearFormFields = () => {
     setFormTitle('');
     setFormCategory('');
     setFormFormat('');
@@ -115,8 +115,12 @@ export default function InputPage() {
     setFormSource('');
     setFormContent('');
     setFormPriority('NORMAL');
-    setSelectedStoryId(null);
     setPendingFiles([]);
+  };
+
+  const resetForm = () => {
+    clearFormFields();
+    setSelectedStoryId(null);
   };
 
   /* ── file handling ── */
@@ -157,7 +161,8 @@ export default function InputPage() {
 
         if (!uploadRes.ok) {
           const err = await uploadRes.json();
-          throw new Error(err.error || 'Upload failed');
+          const detailedMsg = err.details ? `${err.error}: ${err.details}` : (err.error || 'Upload failed');
+          throw new Error(detailedMsg);
         }
 
         const uploadData = await uploadRes.json();
