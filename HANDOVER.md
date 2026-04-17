@@ -73,6 +73,7 @@ erDiagram
         string fullName
         enum role
         string email
+        string passwordHash
     }
 
     Story {
@@ -134,11 +135,14 @@ erDiagram
 | **Top Navigation** | ✅ Completed | Fixed nav with workspace, input, output, hub, rundown, settings. |
 | **Dark Theme** | ✅ Completed | Professional charcoal theme implemented. |
 | **Zustand Store** | ✅ Completed | Integrated with persistence and seed data. |
+| **User Auth** | ✅ Completed | NextAuth implemented with custom credentials and middleware. |
+| **Real-time (SSE)** | ✅ Completed | In-process event bus and `/api/events` for live updates. |
+| **Viz Pilot** | ✅ Completed | Custom `vizpilot://` protocol launching local `.bat` file. |
 | **Input Page** | 🟡 In Progress | Story creation active; local media ingestion needs final hookup. |
 | **Editor Hub** | 🟢 Polished | Dual-mode (Video/Copy) UI state working. |
 | **Rundown** | 🟡 In Progress | Table view active; reordering and timing logic pending. |
 | **Settings** | 🟡 Basic | UI layout ready; actual state persistence per section in progress. |
-| **MOS/VIZ/CAS** | ⚪ Planned | Status indicators in nav are placeholders. |
+| **MOS/CAS** | ⚪ Planned | Status indicators in nav are placeholders. |
 
 ---
 
@@ -161,6 +165,8 @@ erDiagram
 
 ### Key Environment Variables
 - `DATABASE_URL`: Connection string for PostgreSQL.
+- `NEXTAUTH_SECRET`: Secret for NextAuth session encryption.
+- `NEXTAUTH_URL`: Base URL of the application.
 - `STORAGE_BASE_PATH`: Local directory for raw/edited media storage.
 - `FFMPEG_PATH`: Path to FFmpeg binary for proxy generation.
 
@@ -173,4 +179,4 @@ erDiagram
 - **File Watcher Safety**: When implementing the file watcher, handle file locking gracefully as editors may still be writing to the output directory.
 
 ---
-*Documentation generated on 2026-04-15 by Antigravity AI.*
+*Documentation updated to reflect latest codebase.*
