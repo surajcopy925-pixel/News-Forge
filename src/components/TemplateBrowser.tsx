@@ -133,42 +133,37 @@ export default function TemplateBrowser({
     }
   }, []);
 
-  // ─── Launch Viz Pilot via server-side Edge IE mode ─────
-  const handleLaunchVizPilot = async () => {
+  // ─── Launch Viz Pilot on the LOCAL client machine via custom protocol ─────
+  // Requires vizpilot:// to be registered in Windows registry on each workstation.
+  // Users run public/vizpilot-protocol.reg once to set it up.
+  const handleLaunchVizPilot = () => {
     const now = new Date().toISOString();
     setLaunchTime(now);
     setMode('adding');
     setError(null);
-    setLaunchStatus('Launching Viz Pilot...');
+    setLaunchStatus('Opening Viz Pilot on this station...');
     setNewElements([]);
 
-    try {
-      const res = await fetch('/api/viz/launch-pilot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          storyId,
-          entryId,
-          storySlug: storySlug || storyId,
-        }),
-      });
+    // Build context params for the bat file
+    const params = new URLSearchParams({
+      ncsid: 'NEWSFORGE',
+      storyid: storyId || '',
+      storyslug: storySlug || storyId || '',
+    });
+    if (entryId) params.set('entryid', entryId);
 
-      const data = await res.json();
+    // Trigger the vizpilot:// custom protocol — runs open-viz-pilot.bat on THIS machine
+    const protocolUrl = `vizpilot://launch?${params.toString()}`;
+    window.location.href = protocolUrl;
 
-      if (data.success) {
-        setLaunchStatus(null);
-      } else {
-        setLaunchStatus(null);
-        setError(`Launch failed: ${data.error}`);
-      }
-    } catch (err: unknown) {
+    // Give the OS a moment to respond, then update status
+    setTimeout(() => {
       setLaunchStatus(null);
-      setError(`Could not reach launcher: ${(err as Error).message}`);
-    }
-
-    // Start polling regardless — user might open manually
-    setTimeout(() => startPolling(now), 2000);
+      // Start polling PDS for newly saved elements after a short delay
+      startPolling(now);
+    }, 1500);
   };
+
 
   // ─── Manual refresh ────────────────────────────────────
   const handleRefresh = async () => {
@@ -326,6 +321,14 @@ export default function TemplateBrowser({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4">
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+            <strong>First time using Viz Pilot from this browser?</strong><br />
+            You need to install the protocol handler on this workstation. 
+            <a href="/vizpilot-protocol.reg" download className="ml-1 text-blue-600 underline font-medium cursor-pointer">
+              Download and run vizpilot-protocol.reg
+            </a>, then click Yes to the registry warnings.
+          </div>
+          
           {/* Existing CG List */}
           {sortedCgs.length > 0 && (
             <div className="mb-4">
@@ -437,7 +440,7 @@ export default function TemplateBrowser({
                   {sortedCgs.length === 0 ? 'Add CG Graphic' : 'Add Another CG'}
                 </span>
                 <span className="text-xs text-gray-400">
-                  Opens Viz Pilot in Edge IE mode
+                  Opens Viz Pilot on this workstation via protocol
                 </span>
               </div>
             </button>
@@ -453,7 +456,7 @@ export default function TemplateBrowser({
                 <div className="flex items-center gap-2 mb-3">
                   <Check size={16} className="text-green-600" />
                   <span className="text-sm text-green-800 font-medium">
-                    Viz Pilot opened in Edge IE mode
+                    Viz Pilot launched on this station
                   </span>
                   {savedCount > 0 && (
                     <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full ml-auto">

@@ -8,19 +8,29 @@ This document dives deep into the architectural decisions and implementation det
 graph TD
     Client[Next.js Frontend]
     Store[Zustand Store / Persistence]
+    Auth[NextAuth.js]
     API[Next.js API Routes]
+    SSE[SSE /api/events]
+    EventBus[In-Process Event Bus]
     DB[(PostgreSQL / Prisma)]
     Files[(Local Media Storage)]
     Watcher[File Watcher Service]
     FFmpeg[FFmpeg Proxy Gen]
+    VizPilot[Viz Pilot / Custom Protocol]
 
     Client <--> Store
+    Client <--> Auth
     Client <--> API
+    Client <-- "Real-time Updates" --> SSE
+    Auth <--> API
     API <--> DB
+    API --> EventBus
+    EventBus --> SSE
     Watcher --> Files
     Watcher --> DB
     Watcher --> FFmpeg
     FFmpeg --> Files
+    Client -- "vizpilot:// Launch" --> VizPilot
 ```
 
 ## 2. Key Architectural Decisions
@@ -32,9 +42,25 @@ Instead of separating frontend and backend, we use Next.js for both. This simpli
 The application state (Stories, Clips, Rundowns) is managed globally using **Zustand**. 
 - **Consistency**: All tabs reflect state changes immediately.
 - **Persistence**: Critical session state is persisted to `localStorage` to survive refreshes.
-- **Hydration**: State is hydrated from the database on initial session load.
+- **Hydration**: State is hydrated from the database on initial session load, combined with real-time SSE.
 
-### 2.3 File-Based Media Workflow
+### 2.3 User Authentication & NextAuth
+Authentication is handled via **NextAuth.js** with a Custom Credentials Provider.
+- Sessions are managed server-side and checked on route access via middleware.
+- API endpoints are protected using server-side session checks to ensure data security.
+
+### 2.4 Real-time Updates (SSE)
+A lightweight Server-Sent Events (SSE) implementation is used for real-time collaboration.
+- **Event Bus**: An in-process singleton event bus (`src/lib/event-bus.ts`) acts as the pub/sub core.
+- **API Events Endpoint**: `/api/events` streams updates to connected clients.
+- **Client Sync**: A custom `useSSE` hook listens for events and invalidates TanStack Query caches, seamlessly updating the UI across different browser sessions.
+
+### 2.5 Viz Pilot Integration (Local Protocol)
+Instead of relying on server-side launchers, Viz Pilot is integrated directly on the client's workstation:
+- **Custom Protocol**: Windows workstations register a `vizpilot://` protocol using a provided `.reg` file.
+- **Bat Execution**: The browser triggers the protocol, which executes a local `.bat` file on the machine, passing story context as parameters to launch Viz Pilot locally.
+
+### 2.6 File-Based Media Workflow
 To handle large broadcast-quality media files without overloading the database:
 - Raw files are stored on a high-speed local drive/NAS.
 - Only metadata and file paths are stored in PostgreSQL.
@@ -77,4 +103,4 @@ ffmpeg -i {input_path} -vcodec libx264 -crf 28 -acodec aac -s 1280x720 {proxy_pa
 This ensures editors can preview footage in the browser without downloading gigabytes of raw data.
 
 ---
-*Documentation generated on 2026-04-15 by Antigravity AI.*
+*Documentation updated to reflect latest codebase.*

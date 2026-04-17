@@ -1,0 +1,22 @@
+Windows Registry Editor Version 5.00
+
+; ─────────────────────────────────────────────────────────────────
+; NewsForge — Viz Pilot Protocol Handler
+; Run this file ONCE on each workstation to register the vizpilot://
+; custom URI scheme. After registration, clicking "Add Graphic" in
+; NewsForge will open Viz Pilot directly on THIS machine.
+; ─────────────────────────────────────────────────────────────────
+
+[HKEY_CLASSES_ROOT\vizpilot]
+@="URL:Viz Pilot Protocol"
+"URL Protocol"=""
+
+[HKEY_CLASSES_ROOT\vizpilot\DefaultIcon]
+@="C:\\NewsForge\\open-viz-pilot.bat,0"
+
+[HKEY_CLASSES_ROOT\vizpilot\shell]
+
+[HKEY_CLASSES_ROOT\vizpilot\shell\open]
+
+[HKEY_CLASSES_ROOT\vizpilot\shell\open\command]
+@="\"C:\\NewsForge\\open-viz-pilot.bat\" \"%1\""

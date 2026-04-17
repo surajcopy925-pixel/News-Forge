@@ -1,6 +1,6 @@
 # News Forge — Broadcast NRCS Web Application
 
-News Forge is a high-performance Newsroom Computer System (NRCS) tailored for modern broadcast workflows. It facilitates the end-to-end editorial process, from story ingestion to playout.
+News Forge is a high-performance Newsroom Computer System (NRCS) tailored for modern broadcast workflows. It facilitates the end-to-end editorial process, from story ingestion to playout, with real-time collaboration and secure authentication.
 
 ## 🚀 Technical Handover
 If you are taking over this project, please refer to the following comprehensive guides:
@@ -16,20 +16,35 @@ If you are taking over this project, please refer to the following comprehensive
 npm install
 ```
 
-### 2. Database Setup
-Ensure you have a PostgreSQL instance running and update your `.env` file with the connection string. Then run:
+### 2. Environment Variables
+Create a `.env` file based on your environment. Ensure you have the following keys:
+```env
+DATABASE_URL="postgresql://user:pass@localhost:5432/newsforge"
+NEXTAUTH_URL="http://localhost:3000"
+NEXTAUTH_SECRET="generate-a-secure-secret-here"
+```
+
+### 3. Database Setup
+Ensure you have a PostgreSQL instance running. Then run:
 ```bash
 npx prisma db push
 npm run prisma:seed
 ```
+*Note: The seed script will create default users (e.g., `admin@newsforge.com` / `newsforge123`).*
 
-### 3. Development
+### 4. Client Workstation Setup (Viz Pilot)
+For users interacting with CG Graphics, the local machine must be configured to handle the custom protocol:
+1. Locate `public/vizpilot-protocol.reg` in the repository or download it from the web interface.
+2. Double-click the file to register the `vizpilot://` protocol handler in the Windows Registry.
+
+### 5. Development
 ```bash
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) to view the application.
+Open [http://localhost:3000](http://localhost:3000) to view the application. You will be redirected to the login page.
 
 ## 🏗️ Core Pages
+- **Login**: Secure access via NextAuth.
 - **Workspace**: User profile and personal settings.
 - **Input**: Story creation and media upload.
 - **Output**: Editorial direction and instructions.

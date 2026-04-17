@@ -425,7 +425,7 @@ export default function RundownPage() {
         category: 'General', location: 'Newsroom', source: 'Internal',
         format: nFormat || undefined, status: 'DRAFT', content: nContent,
         priority: 'NORMAL', createdBy: userId, plannedDuration: nDur,
-        language: 'EN'
+        language: 'en'
       } as any);
       const realRundownId = await ensureRundownExists(selectedRundownId);
       await addEntryMutation.mutateAsync({
