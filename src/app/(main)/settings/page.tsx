@@ -1,23 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import React from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Settings, HardDrive, LayoutList, Cable, MonitorPlay,
   Users, Type, Bot, Activity, CheckCircle, AlertTriangle,
   XCircle, Save
 } from 'lucide-react';
-
-const sections = [
-  { id: 'general', label: 'General', icon: Settings },
-  { id: 'storage', label: 'Storage & Paths', icon: HardDrive },
-  { id: 'rundown', label: 'Rundown Config', icon: LayoutList },
-  { id: 'mos', label: 'MOS Connections', icon: Cable },
-  { id: 'playout', label: 'Playout Engine', icon: MonitorPlay },
-  { id: 'users', label: 'Users & Roles', icon: Users },
-  { id: 'fonts', label: 'Font Management', icon: Type },
-  { id: 'automation', label: 'Automation', icon: Bot },
-  { id: 'health', label: 'System Health', icon: Activity },
-];
 
 const healthEvents = [
   { time: '14:23:01', severity: 'warning', component: 'Storage', message: '/media/edited below 100GB threshold' },
@@ -27,35 +16,24 @@ const healthEvents = [
   { time: '14:05:00', severity: 'ok', component: 'Scheduler', message: 'Generated rundown slots for 15/04' },
 ];
 
+const sections = [
+  { id: 'general', label: 'General' },
+  { id: 'storage', label: 'Storage & Paths' },
+  { id: 'rundown', label: 'Rundown Config' },
+  { id: 'mos', label: 'MOS Connections' },
+  { id: 'playout', label: 'Playout Engine' },
+  { id: 'users', label: 'Users & Roles' },
+  { id: 'fonts', label: 'Font Management' },
+  { id: 'automation', label: 'Automation' },
+  { id: 'health', label: 'System Health' },
+];
+
 export default function SettingsPage() {
-  const [activeSection, setActiveSection] = useState('general');
+  const searchParams = useSearchParams();
+  const activeSection = searchParams.get('section') || 'general';
 
   return (
-    <div className="flex h-full">
-      {/* ═══ LEFT NAV ═══ */}
-      <div className="w-56 shrink-0 bg-nf-surface border-r border-nf-border p-2 overflow-y-auto">
-        {sections.map(sec => {
-          const Icon = sec.icon;
-          const isActive = activeSection === sec.id;
-          return (
-            <button
-              key={sec.id}
-              onClick={() => setActiveSection(sec.id)}
-              className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-md text-xs font-medium transition-colors
-                ${isActive
-                  ? 'bg-blue-500/10 text-blue-400 border-l-2 border-l-blue-500'
-                  : 'text-gray-400 hover:bg-nf-panel/50 hover:text-gray-300 border-l-2 border-l-transparent'
-                }`}
-            >
-              <Icon size={15} />
-              {sec.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ═══ RIGHT CONTENT ═══ */}
-      <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex-1 overflow-y-auto p-6">
 
         {/* ── GENERAL ── */}
         {activeSection === 'general' && (
@@ -289,7 +267,6 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }

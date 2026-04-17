@@ -1,17 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { User, Mail, Phone, Shield, Palette, Bell, Lock, Save } from 'lucide-react';
-
-const themes = [
-  { id: 'dark-pro', name: 'Dark Professional', desc: 'Default dark theme', color: '#0B1120' },
-  { id: 'light', name: 'Light Clean', desc: 'Light theme for offices', color: '#F8FAFC' },
-  { id: 'dark-hc', name: 'Dark High-Contrast', desc: 'Accessibility focused', color: '#000000' },
-  { id: 'light-warm', name: 'Light Warm', desc: 'Reduced eye strain', color: '#FFFBF0' },
-];
+import { User, Mail, Phone, Shield, Bell, Lock, Save } from 'lucide-react';
+import { ThemePicker } from '@/components/ThemePicker';
 
 export default function WorkspacePage() {
-  const [selectedTheme, setSelectedTheme] = useState('dark-pro');
 
   return (
     <div className="h-full overflow-y-auto">
@@ -122,34 +114,16 @@ export default function WorkspacePage() {
           </div>
         </div>
 
-        {/* Theme Selector */}
-        <div className="bg-nf-surface rounded-xl border border-nf-border p-6 mt-4">
-          <h3 className="text-sm font-bold text-gray-300 flex items-center gap-2 mb-4">
-            <Palette size={14} /> Theme
-          </h3>
-          <div className="grid grid-cols-2 gap-3">
-            {themes.map(theme => (
-              <button
-                key={theme.id}
-                onClick={() => setSelectedTheme(theme.id)}
-                className={`p-3 rounded-lg border text-left transition-all
-                  ${selectedTheme === theme.id
-                    ? 'border-blue-500 bg-blue-500/5'
-                    : 'border-nf-border hover:border-nf-border-light bg-nf-bg'
-                  }`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-5 h-5 rounded border border-nf-border" style={{ background: theme.color }} />
-                  <span className="text-xs font-medium text-gray-200">{theme.name}</span>
-                </div>
-                <span className="text-[10px] text-gray-500">{theme.desc}</span>
-                {selectedTheme === theme.id && (
-                  <div className="text-[9px] text-blue-400 font-bold mt-1">✓ Active</div>
-                )}
-              </button>
-            ))}
+        {/* Theme */}
+        <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <svg className="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008z" />
+            </svg>
+            <h2 className="text-sm font-semibold text-zinc-200">Theme</h2>
           </div>
-        </div>
+          <ThemePicker />
+        </section>
 
         {/* Notifications */}
         <div className="bg-nf-surface rounded-xl border border-nf-border p-6 mt-4 mb-8">

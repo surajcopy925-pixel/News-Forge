@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { QueryProvider } from "@/providers/QueryProvider";
 import AuthProvider from "@/providers/AuthProvider";
+import { ThemeProvider } from '@/components/providers/ThemeProvider';
 
 export const metadata: Metadata = {
   title: "NEWS FORGE | KAYAK",
@@ -15,10 +16,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased dark" suppressHydrationWarning>
-      <body className="h-full bg-background text-foreground overflow-hidden" suppressHydrationWarning>
+      <body className="h-full overflow-hidden" suppressHydrationWarning>
         <AuthProvider>
           <QueryProvider>
-            {children}
+            <ThemeProvider>
+              {children}
+            </ThemeProvider>
           </QueryProvider>
         </AuthProvider>
       </body>
