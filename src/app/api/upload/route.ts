@@ -44,6 +44,12 @@ export async function POST(request: NextRequest) {
     // Save to uploads/raw/
     console.log(`[upload] Saving to raw/${fileName}...`);
     const savedResult = await saveFile(buffer, 'raw', fileName);
+    try {
+      await saveFile(buffer, 'playout', fileName);
+      console.log(`[upload] Also saved to playout: ${fileName}`);
+    } catch (playoutErr) {
+      console.warn('[upload] Failed to save to playout folder:', playoutErr);
+    }
     const savedPath = savedResult.filePath;
     console.log(`[upload] Saved to: ${savedPath}`);
     const fileUrl = `/api/files/raw/${fileName}`;
@@ -89,13 +95,15 @@ export async function POST(request: NextRequest) {
       proxyUrl,
       thumbnailUrl,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown upload error';
+    const stack = error instanceof Error ? error.stack : undefined;
     console.error('[upload] FATAL ERROR during upload process:', error);
     return NextResponse.json(
       { 
         error: 'Upload failed', 
-        details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        details: message,
+        stack: process.env.NODE_ENV === 'development' ? stack : undefined
       },
       { status: 500 }
     );

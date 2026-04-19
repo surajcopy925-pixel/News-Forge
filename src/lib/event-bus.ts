@@ -1,7 +1,26 @@
+export enum EventType {
+  STORY_UPDATED = 'story.updated',
+  STORY_DELETED = 'story.deleted',
+  STORY_CREATED = 'story.created',
+  STORY_MOVED = 'story.moved',
+  RUNDOWN_REORDERED = 'rundown.reordered',
+  RUNDOWN_ACTIVATED = 'rundown.activated',
+  RUNDOWN_DEACTIVATED = 'rundown.deactivated',
+}
+
 type EventCallback = (data: any) => void;
 
-class EventBus {
+export class EventBus {
   private listeners: Map<string, Set<EventCallback>> = new Map();
+
+  // Aliases for MOS Bridge compatibility
+  on(event: string, callback: EventCallback) { 
+    return this.subscribe(event, callback); 
+  }
+
+  emit(event: string, data: any) { 
+    this.publish(event, data); 
+  }
 
   subscribe(channel: string, callback: EventCallback): () => void {
     if (!this.listeners.has(channel)) {
@@ -56,10 +75,10 @@ export const CHANNELS = {
   CG: 'cg',
 } as const;
 
-export type EventType = 'created' | 'updated' | 'deleted' | 'reordered';
+export type SSEEventType = 'created' | 'updated' | 'deleted' | 'reordered';
 
 export interface SSEEvent {
-  type: EventType;
+  type: SSEEventType;
   entity: string;
   entityId?: string;
   data?: any;
@@ -69,7 +88,7 @@ export interface SSEEvent {
 
 export function publishEvent(
   channel: string,
-  type: EventType,
+  type: SSEEventType,
   entityId?: string,
   data?: any,
   userId?: string

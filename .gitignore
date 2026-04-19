@@ -45,6 +45,9 @@ next-env.d.ts
 # Uploaded media files
 /uploads
 
+# CasparCG generated rundowns
+/caspar-rundowns/
+
 # Logs
 *.log
 /server.log

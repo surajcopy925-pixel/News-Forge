@@ -4,11 +4,13 @@ import fsSync from 'fs';
 import path from 'path';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
+const CASPAR_MEDIA_PATH = process.env.CASPAR_MEDIA_PATH || path.join(UPLOAD_ROOT, 'playout');
 
 export const UPLOAD_DIRS = {
   raw: path.join(UPLOAD_ROOT, 'raw'),
   proxy: path.join(UPLOAD_ROOT, 'proxy'),
   thumbnails: path.join(UPLOAD_ROOT, 'thumbnails'),
+  playout: CASPAR_MEDIA_PATH,
 } as const;
 
 export type UploadCategory = keyof typeof UPLOAD_DIRS;
@@ -40,10 +42,10 @@ export async function saveFile(
   }
 
   await ensureUploadDirs();
-  const filePath = path.join(UPLOAD_DIRS[category], fileName);
+  const filePath = path.resolve(UPLOAD_DIRS[category], fileName);
   
   // Security: prevent path traversal
-  if (!filePath.startsWith(UPLOAD_ROOT)) {
+  if (!isAllowedPath(filePath)) {
     throw new Error('Invalid file path');
   }
 
@@ -59,7 +61,7 @@ export async function saveFile(
 
 /** Delete a file from disk */
 export async function deleteFile(category: UploadCategory, fileName: string): Promise<boolean> {
-  const filePath = path.join(UPLOAD_DIRS[category], fileName);
+  const filePath = path.resolve(UPLOAD_DIRS[category], fileName);
   try {
     if (fsSync.existsSync(filePath)) {
       await fs.unlink(filePath);
@@ -73,9 +75,10 @@ export async function deleteFile(category: UploadCategory, fileName: string): Pr
 
 /** Get absolute file path (with path traversal protection) */
 export function getFilePath(category: string, fileName: string): string | null {
-  const filePath = path.join(UPLOAD_ROOT, category, fileName);
+  if (!(category in UPLOAD_DIRS)) return null;
+  const filePath = path.resolve(UPLOAD_DIRS[category as UploadCategory], fileName);
   // Security: prevent path traversal attacks
-  if (!filePath.startsWith(UPLOAD_ROOT)) return null;
+  if (!isAllowedPath(filePath)) return null;
   if (!fsSync.existsSync(filePath)) return null;
   return filePath;
 }
@@ -85,4 +88,13 @@ export async function getFileStats(category: string, fileName: string): Promise<
   const filePath = getFilePath(category, fileName);
   if (!filePath) return null;
   return await fs.stat(filePath);
+}
+
+function isAllowedPath(filePath: string): boolean {
+  const normalizedPath = path.resolve(filePath);
+  return [UPLOAD_ROOT, CASPAR_MEDIA_PATH].some((root) => isWithinRoot(normalizedPath, path.resolve(root)));
+}
+
+function isWithinRoot(filePath: string, root: string): boolean {
+  return filePath === root || filePath.startsWith(`${root}${path.sep}`);
 }

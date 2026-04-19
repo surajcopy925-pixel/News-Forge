@@ -161,18 +161,36 @@ export async function GET(
       }
     }
 
-    // Build a MOS XML stub for the object (used later for MOS send)
-    // objSlug uses the element name (always populated), objGroup uses templateName (may be empty)
-    const mosObjXml = `<mosObj>
-  <objID>${elementId}</objID>
-  <objSlug>${elementName}</objSlug>
-  <objGroup>${templateName || elementName}</objGroup>
-  <objType>GRAPHIC</objType>
-  <objTB>0</objTB>
-  <objRev>1</objRev>
-  <objAir>0</objAir>
-  <defaultAirMethod>TAKE</defaultAirMethod>
-</mosObj>`;
+    // ── Fetch REAL MOS XML from PDS (this is what Viz Director needs) ──
+    let mosObjXml: string | null = null;
+    try {
+      const mosXmlUrl = `${VIZ_PDS_URL}/dataelements/${elementId}/mosxml`;
+      const mosXmlController = new AbortController();
+      const mosXmlTimeout = setTimeout(() => mosXmlController.abort(), 10000);
+
+      const mosXmlResponse = await fetch(mosXmlUrl, {
+        signal: mosXmlController.signal,
+        headers: { 'Accept': 'application/xml, text/xml, */*' },
+      });
+      clearTimeout(mosXmlTimeout);
+
+      if (mosXmlResponse.ok) {
+        const rawMosXml = await mosXmlResponse.text();
+        // Strip <?xml ?> declaration — it goes inside another XML document
+        mosObjXml = rawMosXml.replace(/<\?xml[^?]*\?>\s*/g, '').trim();
+        console.log(`[PDS] ✅ Real mosxml fetched for element ${elementId}, length: ${mosObjXml.length}`);
+      } else {
+        console.warn(`[PDS] ⚠️ mosxml endpoint returned ${mosXmlResponse.status} for element ${elementId}`);
+      }
+    } catch (mosErr: unknown) {
+      console.warn(`[PDS] ⚠️ mosxml fetch error for element ${elementId}:`, (mosErr as Error).message);
+    }
+
+    // Fallback only if PDS mosxml endpoint failed completely
+    if (!mosObjXml) {
+      console.warn(`[PDS] Using fallback stub for element ${elementId} — Director may not recognize this`);
+      mosObjXml = `<mosObj><objID>${elementId}</objID><objSlug>${elementName}</objSlug><objType>GRAPHIC</objType><objTB>0</objTB><objDur>0</objDur><status>READY</status></mosObj>`;
+    }
 
     return NextResponse.json({
       id: elementId,

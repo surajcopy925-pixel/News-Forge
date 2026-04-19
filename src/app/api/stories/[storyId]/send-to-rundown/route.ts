@@ -10,6 +10,7 @@ import {
 } from '@/lib/api-helpers';
 import { getCurrentUserId } from '@/lib/get-current-user';
 import { emitStoryEvent } from '@/lib/api-events';
+import { eventBus, EventType } from '@/lib/event-bus';
 
 type Params = { params: Promise<{ storyId: string }> };
 
@@ -82,6 +83,29 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     emitStoryEvent('updated', storyId);
+
+    // Emit event for teleprompter sync
+    try {
+      const allEntries = await prisma.rundownEntry.findMany({
+        where: { rundownId: rundownId },
+        orderBy: { orderIndex: 'asc' },
+        select: { entryId: true, storyId: true },
+      });
+
+      const entryIndex = allEntries.findIndex(e => e.entryId === (entry as any).entryId);
+      const afterStoryId = entryIndex > 0
+        ? allEntries[entryIndex - 1].storyId
+        : '';
+
+      eventBus.emit(EventType.STORY_CREATED, {
+        rundownId: rundownId,
+        storyId: storyId,
+        scriptText: (entry as any).scriptContent || '',
+        afterStoryId: afterStoryId,
+      });
+    } catch (eventError) {
+      console.error('[API] Failed to emit send-to-rundown event:', eventError);
+    }
 
     return successResponse(toFrontendEntry(entry), 201);
   } catch (e: any) {

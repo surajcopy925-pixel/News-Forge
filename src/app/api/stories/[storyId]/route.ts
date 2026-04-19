@@ -9,6 +9,7 @@ import {
 } from '@/lib/api-helpers';
 import { getCurrentUserId } from '@/lib/get-current-user';
 import { emitStoryEvent } from '@/lib/api-events';
+import { eventBus, EventType } from '@/lib/event-bus';
 
 type Params = { params: Promise<{ storyId: string }> };
 
@@ -78,6 +79,24 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     emitStoryEvent('updated', storyId);
 
+    // Emit event for teleprompter sync
+    try {
+      const linkedEntries = await prisma.rundownEntry.findMany({
+        where: { storyId: storyId },
+        select: { rundownId: true, entryId: true },
+      });
+
+      for (const entry of linkedEntries) {
+        eventBus.emit(EventType.STORY_UPDATED, {
+          rundownId: entry.rundownId,
+          storyId: storyId,
+          scriptText: body.content || story.content,
+        });
+      }
+    } catch (eventError) {
+      console.error('[API] Failed to emit story update event:', eventError);
+    }
+
     return successResponse(toFrontendStory(story));
   } catch (e: any) {
     console.error('PATCH /api/stories/[id] error:', e);
@@ -93,7 +112,25 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     if (!existing) return notFoundResponse('Story', storyId);
     
     const userId = await getCurrentUserId();
+    
+    // 1. First, find linked rundown entries (BEFORE delete)
+    const linkedEntries = await prisma.rundownEntry.findMany({
+      where: { storyId: storyId },
+      select: { rundownId: true },
+    });
+
+    // 2. Then delete the story
     await prisma.story.delete({ where: { storyId } });
+
+    // 3. Then emit events
+    for (const entry of linkedEntries) {
+      try {
+        eventBus.emit(EventType.STORY_DELETED, {
+          rundownId: entry.rundownId,
+          storyId: storyId,
+        });
+      } catch (e) {}
+    }
 
     await createAuditLog({
       userId,

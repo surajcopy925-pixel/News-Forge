@@ -7,6 +7,7 @@ import {
   createAuditLog,
 } from '@/lib/api-helpers';
 import { emitEntryEvent } from '@/lib/api-events';
+import { eventBus, EventType } from '@/lib/event-bus';
 
 type Params = { params: Promise<{ rundownId: string }> };
 
@@ -39,6 +40,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     });
 
     emitEntryEvent('reordered', rundownId, { rundownId });
+
+    // Emit reorder event for teleprompter sync
+    try {
+      // Get the new order of stories after reordering
+      const reorderedEntries = await prisma.rundownEntry.findMany({
+        where: { rundownId },
+        orderBy: { orderIndex: 'asc' },
+        select: { storyId: true, orderIndex: true },
+      });
+
+      eventBus.emit(EventType.RUNDOWN_REORDERED, {
+        rundownId,
+        storyOrder: reorderedEntries.map(e => e.storyId),
+      });
+    } catch (eventError) {
+      console.error('[API] Failed to emit reorder event:', eventError);
+    }
 
     return successResponse({ reordered: true, rundownId, count: entryIds.length });
   } catch (e: any) {

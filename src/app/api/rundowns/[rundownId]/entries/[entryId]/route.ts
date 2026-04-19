@@ -8,6 +8,7 @@ import {
   createAuditLog,
 } from '@/lib/api-helpers';
 import { emitEntryEvent } from '@/lib/api-events';
+import { eventBus, EventType } from '@/lib/event-bus';
 
 type Params = { params: Promise<{ rundownId: string; entryId: string }> };
 
@@ -50,6 +51,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     emitEntryEvent('updated', entryId, { rundownId: entry.rundownId });
 
+    // Emit event for teleprompter sync
+    try {
+      eventBus.emit(EventType.STORY_UPDATED, {
+        rundownId: entry.rundownId,
+        storyId: entry.storyId,
+        scriptText: entry.scriptContent || body.scriptContent,
+      });
+    } catch (eventError) {
+      console.error('[API] Failed to emit entry update event:', eventError);
+    }
+
     return successResponse(toFrontendEntry(entry));
   } catch (e: any) {
     console.error('PATCH /api/rundowns/[id]/entries/[id] error:', e);
@@ -90,6 +102,16 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     });
 
     emitEntryEvent('deleted', entryId, { rundownId });
+
+    // Emit event for teleprompter sync
+    try {
+      eventBus.emit(EventType.STORY_DELETED, {
+        rundownId,
+        storyId: existing.storyId,
+      });
+    } catch (eventError) {
+      console.error('[API] Failed to emit entry delete event:', eventError);
+    }
 
     return successResponse({ deleted: true, entryId });
   } catch (e: any) {

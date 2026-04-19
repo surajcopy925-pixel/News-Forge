@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { useStories, useCreateStory, useUpdateStory } from '@/hooks/useStories';
 import { useAuth } from '@/hooks/useAuth';
 import { useClips } from '@/hooks/useClips';
@@ -91,6 +92,9 @@ function fmtDur(d: string | null): string {
 
 /* ═══════════════════════ COMPONENT ═══════════════════════ */
 export default function RundownPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+
   /* ── API data hooks ── */
   const { data: stories = EMPTY_ARRAY, isLoading: storiesLoading } = useStories();
   const { data: allClips = EMPTY_ARRAY, isLoading: clipsLoading } = useClips();
@@ -299,6 +303,16 @@ export default function RundownPage() {
     });
     setSelectedRundownId(best.rundownId);
   }, [allRundowns]);
+
+  useEffect(() => {
+    if (!selectedRundownId) return;
+    const params = new URLSearchParams(window.location.search);
+    const currentRundownId = params.get('rundownId');
+    if (currentRundownId === selectedRundownId) return;
+
+    params.set('rundownId', selectedRundownId);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [pathname, router, selectedRundownId]);
 
   /* ═══════ 8. LOAD DETAIL DATA ═══════ */
   useEffect(() => {

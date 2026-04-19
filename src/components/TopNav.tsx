@@ -23,10 +23,12 @@ const TABS = [
 ];
 
 import UserMenu from './UserMenu';
+import CasparIndicator from './CasparIndicator';
 
 export default function TopNav() {
   const pathname = usePathname();
   const [time, setTime] = useState('');
+  const [rundownId, setRundownId] = useState<string | null>(null);
 
   useEffect(() => {
     const updateTime = () => {
@@ -37,6 +39,17 @@ export default function TopNav() {
     const timer = setInterval(updateTime, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const readRundownId = () => {
+      const params = new URLSearchParams(window.location.search);
+      setRundownId(params.get('rundownId'));
+    };
+
+    readRundownId();
+    window.addEventListener('popstate', readRundownId);
+    return () => window.removeEventListener('popstate', readRundownId);
+  }, [pathname]);
 
   return (
     <nav className="h-12 w-full bg-nf-bg border-b border-nf-border flex items-center px-4 shrink-0 z-50 select-none">
@@ -92,10 +105,7 @@ export default function TopNav() {
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.5)]" />
             <span className="text-gray-500 text-[10px] font-medium tracking-tight group-hover:text-gray-400 transition-colors">VIZ</span>
           </div>
-          <div className="flex items-center gap-1.5 group cursor-help">
-            <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" />
-            <span className="text-gray-500 text-[10px] font-medium tracking-tight group-hover:text-gray-400 transition-colors">CAS</span>
-          </div>
+          <CasparIndicator rundownId={rundownId} />
         </div>
 
         {/* Real-time Clock */}

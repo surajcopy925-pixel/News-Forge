@@ -29,6 +29,16 @@ export interface MosRoStory {
   items: MosRoItem[];
 }
 
+/**
+ * Simplified story structure for teleprompter updates
+ * Unlike MosRoStory, this only carries script text (no CG items)
+ */
+export interface MosPrompterStory {
+  storyId: string;
+  storySlug: string;
+  scriptText: string;
+}
+
 export interface MosRoItem {
   mosObjId: string;
   mosObjXml: string;
@@ -41,7 +51,7 @@ export interface MosRoItem {
 type MosMessageHandler = (type: string, raw: string) => void;
 
 // ─── MOS Bridge Class (TCP SERVER) ──────────────────────
-class MosBridge {
+export class MosBridge {
   private lowerServer: net.Server | null = null;
   private upperServer: net.Server | null = null;
   private lowerClient: net.Socket | null = null;
@@ -450,6 +460,101 @@ class MosBridge {
         <storyNum>${story.items[0]?.orderIndex != null ? story.items[0].orderIndex + 1 : 1}</storyNum>
         ${items}
       </story>`;
+  }
+
+  // ============================================
+  // TELEPROMPTER-SPECIFIC MOS BUILDERS
+  // These send script text updates to the prompter
+  // ============================================
+
+  /**
+   * Replaces a single story's script on the teleprompter
+   * Used when a producer edits a script
+   */
+  buildPrompterStoryReplace(roId: string, story: MosPrompterStory): string {
+    return this.wrapMos(`<roStoryReplace>
+        <roID>${this.esc(roId)}</roID>
+        <storyID>${this.esc(story.storyId)}</storyID>
+        ${this.buildPrompterStoryXml(story)}
+      </roStoryReplace>`);
+  }
+
+  /**
+   * Deletes a story from the teleprompter rundown
+   * Used when a story is removed
+   */
+  buildPrompterStoryDelete(roId: string, storyId: string): string {
+    return this.wrapMos(`<roStoryDelete>
+        <roID>${this.esc(roId)}</roID>
+        <storyID>${this.esc(storyId)}</storyID>
+      </roStoryDelete>`);
+  }
+
+  /**
+   * Inserts a new story into the teleprompter rundown
+   * afterStoryId = story ID after which the new story appears
+   * If afterStoryId is empty, inserts at the beginning
+   */
+  buildPrompterStoryInsert(
+    roId: string,
+    afterStoryId: string,
+    story: MosPrompterStory
+  ): string {
+    return this.wrapMos(`<roStoryInsert>
+        <roID>${this.esc(roId)}</roID>
+        <storyID>${this.esc(afterStoryId)}</storyID>
+        ${this.buildPrompterStoryXml(story)}
+      </roStoryInsert>`);
+  }
+
+  /**
+   * Moves a story to a new position in the teleprompter rundown
+   * beforeStoryId = story ID BEFORE which the moved story should appear
+   */
+  buildPrompterStoryMove(
+    roId: string,
+    storyId: string,
+    beforeStoryId: string
+  ): string {
+    return this.wrapMos(`<roStoryMove>
+        <roID>${this.esc(roId)}</roID>
+        <storyID>${this.esc(beforeStoryId)}</storyID>
+        <storyID>${this.esc(storyId)}</storyID>
+      </roStoryMove>`);
+  }
+
+  /**
+   * Builds a single story XML block for the teleprompter
+   * Unlike buildStoryXml(), this sends clean script text
+   * instead of CG/Vizrt items
+   */
+  private buildPrompterStoryXml(story: MosPrompterStory): string {
+    return `<story>
+        <storyID>${this.esc(story.storyId)}</storyID>
+        <storySlug>${this.esc(story.storySlug)}</storySlug>
+        <storyBody>
+          <storyText>${this.esc(this.cleanText(story.scriptText))}</storyText>
+        </storyBody>
+      </story>`;
+  }
+
+  /**
+   * Strips HTML tags and cleans script text for teleprompter display
+   * Keeps it plain text only — no formatting
+   */
+  private cleanText(html: string): string {
+    if (!html) return '';
+    return html
+      .replace(/<br\s*\/?>/gi, '\n') // Convert <br> to newlines
+      .replace(/<p[^>]*>/gi, '\n') // Convert <p> to newlines
+      .replace(/<\/p>/gi, '') // Remove closing </p>
+      .replace(/<[^>]*>/g, '') // Remove all other HTML tags
+      .replace(/&nbsp;/g, ' ') // Replace &nbsp;
+      .replace(/&amp;/g, '&') // Replace &amp;
+      .replace(/&lt;/g, '<') // Replace &lt;
+      .replace(/&gt;/g, '>') // Replace &gt;
+      .replace(/\n{3,}/g, '\n\n') // Collapse excessive newlines
+      .trim();
   }
 
   private esc(str: string): string {

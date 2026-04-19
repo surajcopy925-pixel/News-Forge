@@ -39,7 +39,20 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const userId = await getCurrentUserId();
-    const { storyId, entryId, templateName, concept, variant, fieldData, channel, layer } = body;
+    const {
+      storyId,
+      entryId,
+      templateName,
+      concept,
+      variant,
+      dataElementName,
+      dataElementId,
+      mosObjId,
+      mosObjXml,
+      fieldData,
+      channel,
+      layer,
+    } = body;
 
     if (!storyId) return errorResponse('storyId is required');
     if (!templateName) return errorResponse('templateName is required');
@@ -59,6 +72,10 @@ export async function POST(req: NextRequest) {
         templateName,
         concept: concept || 'Default',
         variant: variant || 'Default',
+        dataElementName: dataElementName || null,
+        dataElementId: dataElementId || null,
+        mosObjId: mosObjId || null,
+        mosObjXml: mosObjXml || null,
         fieldData: fieldData || {},
         channel: channel || 'GFX1',
         layer: layer || 'FULL',
