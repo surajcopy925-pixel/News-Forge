@@ -21,24 +21,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get rundown with stories in order
-    let rundown: any = null;
-
-    try {
-      rundown = await prisma.rundown.findUnique({
-        where: { rundownId },
-        include: {
-          stories: {
-            orderBy: { createdAt: 'asc' },
+    // Get rundown with entries and stories in order
+    const rundown = await prisma.rundown.findUnique({
+      where: { rundownId },
+      include: {
+        entries: {
+          orderBy: { orderIndex: 'asc' },
+          include: {
+            story: true,
           },
         },
-      });
-    } catch {
-      // If include fails, try getting stories separately
-      rundown = await prisma.rundown.findUnique({
-        where: { rundownId },
-      });
-    }
+      },
+    });
 
     if (!rundown) {
       return NextResponse.json(
@@ -47,20 +41,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get stories — either from include or separate query
-    let stories: any[] = (rundown as any).stories || [];
-
-    if (stories.length === 0) {
-      // Try getting stories by rundownId field
-      try {
-        stories = await prisma.story.findMany({
-          where: { rundownId } as any,
-          orderBy: { createdAt: 'asc' },
-        });
-      } catch {}
-    }
-
-    if (stories.length === 0) {
+    if (rundown.entries.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No stories found in this rundown' },
         { status: 404 }
@@ -68,28 +49,29 @@ export async function POST(req: NextRequest) {
     }
 
     // Build title
-    const rd = rundown as any;
-    const title = rd.broadcastTime
-      ? `${rd.broadcastTime} Bulletin`
-      : rd.date
-        ? `${rd.date} Rundown`
-        : `Rundown ${rd.rundownId.substring(0, 8)}`;
+    const title = rundown.broadcastTime
+      ? `${rundown.broadcastTime} Bulletin`
+      : rundown.date
+        ? `${rundown.date} Rundown`
+        : `Rundown ${rundown.rundownId.substring(0, 8)}`;
 
     // Build story list with scripts in run order
-    const storyList = stories.map((story: any, index: number) => {
-      // Try multiple possible field names for script content
-      const script = story.script
-        || story.body
-        || story.prompterText
-        || story.content
-        || story.text
-        || story.scriptText
-        || '';
+    const storyList = rundown.entries.map((entry: any, index: number) => {
+      const story = entry.story;
+      
+      // Favored order for prompter text
+      const script = story? (
+           story.anchorScript 
+        || story.polishedScript 
+        || story.rawScript 
+        || story.content 
+        || ''
+      ) : '';
 
       return {
-        storyId: story.storyId || story.id || `story-${index}`,
-        orderIndex: story.orderIndex ?? index,
-        title: story.title || story.displayLabel || story.slug || `Story ${index + 1}`,
+        storyId: story?.storyId || entry.entryId,
+        orderIndex: entry.orderIndex,
+        title: story?.title || entry.slug || `Story ${index + 1}`,
         script,
       };
     });
@@ -100,11 +82,15 @@ export async function POST(req: NextRequest) {
     console.log(`[prompter/send] Sending "${title}": ${storyList.length} stories (${withScript} with script)`);
 
     // Send to prompter
-    const result = prompterClient.sendRundown({
-      rundownId: rd.rundownId,
+    const result = await prompterClient.sendRundown(
+      rundown.rundownId,
       title,
-      stories: storyList,
-    });
+      storyList.map(s => ({
+        storyId: s.storyId,
+        storySlug: s.title,
+        scriptText: s.script
+      }))
+    );
 
     return NextResponse.json({
       success: result.success,

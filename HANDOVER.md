@@ -140,9 +140,10 @@ erDiagram
 | **Viz Pilot** | ✅ Completed | Custom `vizpilot://` protocol launching local `.bat` file. |
 | **Input Page** | 🟡 In Progress | Story creation active; local media ingestion needs final hookup. |
 | **Editor Hub** | 🟢 Polished | Dual-mode (Video/Copy) UI state working. |
-| **Rundown** | 🟡 In Progress | Table view active; reordering and timing logic pending. |
+| **Rundown** | ✅ Polished | Fully integrated with story ordering, timing, and MOS. |
 | **Settings** | 🟡 Basic | UI layout ready; actual state persistence per section in progress. |
-| **MOS/CAS** | ⚪ Planned | Status indicators in nav are placeholders. |
+| **Prompter MOS** | ✅ Completed | Dedicated TCP server (Port 10541) for script delivery. |
+| **CasparCG** | 🟡 Testing | Basic playout commands active; playlist sync in progress. |
 
 ---
 

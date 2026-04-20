@@ -3,6 +3,7 @@ import net from 'net';
 // ─── MOS Protocol Constants (from .env) ─────────────────
 const MOS_NCS_ID = process.env.MOS_NCS_ID || 'NEWSFORGE';
 const MOS_DEVICE_ID = process.env.MOS_DEVICE_ID || 'KAYAK';
+const PROMPTER_MOS_ID = process.env.PROMPTER_MOS_ID || 'PROMPTER';
 const MOS_CHANNEL = process.env.MOS_CHANNEL || 'NEWSFORGE_GFX';
 const LOWER_PORT = Number(process.env.MOS_LOWER_PORT) || 10546;
 const UPPER_PORT = Number(process.env.MOS_UPPER_PORT) || 10545;
@@ -372,8 +373,8 @@ export class MosBridge {
   }
 
   // ─── MOS XML Wrapper ──────────────────────────────────
-  private wrapMos(body: string): string {
-    return `<mos>\n  <mosID>${MOS_DEVICE_ID}</mosID>\n  <ncsID>${MOS_NCS_ID}</ncsID>\n  ${body}\n</mos>\n`;
+  private wrapMos(body: string, mosIdOverride?: string): string {
+    return `<mos>\n  <mosID>${mosIdOverride || MOS_DEVICE_ID}</mosID>\n  <ncsID>${MOS_NCS_ID}</ncsID>\n  ${body}\n</mos>\n`;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -468,6 +469,18 @@ export class MosBridge {
   // ============================================
 
   /**
+   * Creates a full rundown for the teleprompter
+   */
+  buildPrompterRoCreate(roId: string, roSlug: string, stories: MosPrompterStory[]): string {
+    return this.wrapMos(`<roCreate>
+        <roID>${this.esc(roId)}</roID>
+        <roSlug>${this.esc(roSlug)}</roSlug>
+        ${stories.map((s) => this.buildPrompterStoryXml(s)).join('\n')}
+      </roCreate>`, PROMPTER_MOS_ID);
+  }
+
+
+  /**
    * Replaces a single story's script on the teleprompter
    * Used when a producer edits a script
    */
@@ -476,7 +489,7 @@ export class MosBridge {
         <roID>${this.esc(roId)}</roID>
         <storyID>${this.esc(story.storyId)}</storyID>
         ${this.buildPrompterStoryXml(story)}
-      </roStoryReplace>`);
+      </roStoryReplace>`, PROMPTER_MOS_ID);
   }
 
   /**
@@ -487,7 +500,7 @@ export class MosBridge {
     return this.wrapMos(`<roStoryDelete>
         <roID>${this.esc(roId)}</roID>
         <storyID>${this.esc(storyId)}</storyID>
-      </roStoryDelete>`);
+      </roStoryDelete>`, PROMPTER_MOS_ID);
   }
 
   /**
@@ -504,7 +517,7 @@ export class MosBridge {
         <roID>${this.esc(roId)}</roID>
         <storyID>${this.esc(afterStoryId)}</storyID>
         ${this.buildPrompterStoryXml(story)}
-      </roStoryInsert>`);
+      </roStoryInsert>`, PROMPTER_MOS_ID);
   }
 
   /**
@@ -520,7 +533,7 @@ export class MosBridge {
         <roID>${this.esc(roId)}</roID>
         <storyID>${this.esc(beforeStoryId)}</storyID>
         <storyID>${this.esc(storyId)}</storyID>
-      </roStoryMove>`);
+      </roStoryMove>`, PROMPTER_MOS_ID);
   }
 
   /**

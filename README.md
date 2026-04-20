@@ -37,7 +37,16 @@ For users interacting with CG Graphics, the local machine must be configured to 
 1. Locate `public/vizpilot-protocol.reg` in the repository or download it from the web interface.
 2. Double-click the file to register the `vizpilot://` protocol handler in the Windows Registry.
 
-### 5. Development
+### 5. Teleprompter Setup (Optional)
+If using a teleprompter like WinPlus/Autocue:
+1. Ensure `PROMPTER_PORT=10541` is open in your firewall.
+2. In your prompter software, add an NCS connection:
+   - **Host:** Server IP
+   - **NCS ID:** `NEWSFORGE`
+   - **MOS ID:** `PROMPTER`
+   - **Port:** `10541`
+
+### 6. Development
 ```bash
 npm run dev
 ```

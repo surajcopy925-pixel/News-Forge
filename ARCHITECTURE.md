@@ -17,6 +17,8 @@ graph TD
     Watcher[File Watcher Service]
     FFmpeg[FFmpeg Proxy Gen]
     VizPilot[Viz Pilot / Custom Protocol]
+    Prompter[Prompter MOS Server]
+    WinPlus[WinPlus Teleprompter]
 
     Client <--> Store
     Client <--> Auth
@@ -31,6 +33,8 @@ graph TD
     Watcher --> FFmpeg
     FFmpeg --> Files
     Client -- "vizpilot:// Launch" --> VizPilot
+    Client -- "Prompter Control" --> Prompter
+    Prompter -- "MOS 2.8.3" --> WinPlus
 ```
 
 ## 2. Key Architectural Decisions
@@ -60,7 +64,14 @@ Instead of relying on server-side launchers, Viz Pilot is integrated directly on
 - **Custom Protocol**: Windows workstations register a `vizpilot://` protocol using a provided `.reg` file.
 - **Bat Execution**: The browser triggers the protocol, which executes a local `.bat` file on the machine, passing story context as parameters to launch Viz Pilot locally.
 
-### 2.6 File-Based Media Workflow
+### 2.6 Teleprompter MOS Bridge (TCP)
+To support real-time script delivery to Teleprompter software (e.g., WinPlus):
+- **TCP Server**: A dedicated `PrompterClient` runs a raw TCP server (default port 10541).
+- **MOS Handshake**: Implements the MOS 2.8.3 handshake (`mosID`, `ncsID`, `heartbeat`).
+- **Data Mapping**: Fetches rundown stories and prioritizes `anchorScript` for prompter text.
+- **Rundown Delivery**: Sends the entire rundown as an `roCreate` XML message, and supports incremental `roStoryReplace` on edit.
+
+### 2.7 File-Based Media Workflow
 To handle large broadcast-quality media files without overloading the database:
 - Raw files are stored on a high-speed local drive/NAS.
 - Only metadata and file paths are stored in PostgreSQL.

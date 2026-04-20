@@ -6,9 +6,182 @@ datasource db {
   provider = "postgresql"
 }
 
-// ═══════════════════════════════════════
-// ENUMS
-// ═══════════════════════════════════════
+model User {
+  userId          String           @id
+  fullName        String
+  role            UserRole
+  email           String           @unique
+  passwordHash    String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  auditLogs       AuditLog[]
+  createdCgItems  CgItem[]         @relation("CgCreator")
+  updatedCgItems  CgItem[]         @relation("CgUpdater")
+  storiesCreated  Story[]          @relation("StoryCreator")
+  storiesPolished Story[]          @relation("StoryPolisher")
+  storiesSentBy   Story[]          @relation("StorySender")
+  claimedClips    StoryClip[]      @relation("ClipClaimer")
+  preferences     UserPreferences?
+
+  @@map("users")
+}
+
+model UserPreferences {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  themePreset String   @default("dark-professional")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model Story {
+  storyId             String         @id
+  title               String
+  slug                String
+  format              StoryFormat    @default(EMPTY)
+  status              StoryStatus    @default(DRAFT)
+  content             String         @default("")
+  rawScript           String         @default("")
+  polishedScript      String?
+  anchorScript        String         @default("")
+  voiceoverScript     String         @default("")
+  editorialNotes      String         @default("")
+  scriptSentToRundown String?
+  sentToRundownId     String?
+  sentToRundownAt     DateTime?
+  sentBy              String?
+  polishedBy          String?
+  polishedAt          DateTime?
+  isPolished          Boolean        @default(false)
+  createdBy           String
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  plannedDuration     String         @default("00:00:00")
+  rundownId           String?
+  orderIndex          Int            @default(0)
+  category            String?
+  location            String?
+  source              String?
+  language            Language       @default(en)
+  priority            Priority       @default(NORMAL)
+  cgItems             CgItem[]
+  rundownEntries      RundownEntry[]
+  creator             User           @relation("StoryCreator", fields: [createdBy], references: [userId])
+  polisher            User?          @relation("StoryPolisher", fields: [polishedBy], references: [userId])
+  rundown             Rundown?       @relation(fields: [rundownId], references: [rundownId])
+  sender              User?          @relation("StorySender", fields: [sentBy], references: [userId])
+  clips               StoryClip[]
+
+  @@map("stories")
+}
+
+model StoryClip {
+  clipId              String     @id
+  storyId             String
+  fileName            String
+  originalFileName    String
+  fileUrl             String?
+  fileType            String     @default("video/mp4")
+  displayLabel        String     @default("")
+  duration            String?
+  status              ClipStatus @default(PENDING)
+  claimedBy           String?
+  claimedAt           DateTime?
+  completedAt         DateTime?
+  editingInstructions String     @default("")
+  editorialNotes      String     @default("")
+  codec               String?
+  resolution          String?
+  fps                 String?
+  proxyUrl            String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  fileSize            Int?
+  thumbnailUrl        String?
+  claimer             User?      @relation("ClipClaimer", fields: [claimedBy], references: [userId])
+  story               Story      @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
+
+  @@map("story_clips")
+}
+
+model Rundown {
+  rundownId       String         @id
+  title           String
+  date            String
+  broadcastTime   String
+  plannedDuration String         @default("00:30:00")
+  status          RundownStatus  @default(PLANNING)
+  mosStatus       MosStatus      @default(OFFLINE)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  entries         RundownEntry[]
+  stories         Story[]
+
+  @@unique([date, broadcastTime])
+  @@map("rundowns")
+}
+
+model RundownEntry {
+  entryId       String        @id
+  rundownId     String
+  storyId       String
+  orderIndex    Int           @default(0)
+  scriptContent String?
+  scriptSource  ScriptSource?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  cgItems       CgItem[]
+  rundown       Rundown       @relation(fields: [rundownId], references: [rundownId], onDelete: Cascade)
+  story         Story         @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
+
+  @@map("rundown_entries")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  oldValue  Json?
+  newValue  Json?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [userId])
+
+  @@map("audit_logs")
+}
+
+model CgItem {
+  cgItemId        String        @id
+  storyId         String
+  entryId         String?
+  templateName    String        @default("")
+  concept         String        @default("")
+  variant         String        @default("")
+  dataElementName String        @default("")
+  dataElementId   String?
+  fieldData       Json          @default("{}")
+  mosObjId        String?
+  mosObjXml       String?
+  orderIndex      Int           @default(0)
+  channel         String        @default("GFX1")
+  layer           String        @default("FULL")
+  status          CgStatus      @default(DRAFT)
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  creator         User          @relation("CgCreator", fields: [createdBy], references: [userId])
+  entry           RundownEntry? @relation(fields: [entryId], references: [entryId])
+  story           Story         @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
+  updater         User?         @relation("CgUpdater", fields: [updatedBy], references: [userId])
+
+  @@map("cg_items")
+}
 
 enum StoryFormat {
   PKG
@@ -73,224 +246,10 @@ enum Priority {
   LOW
 }
 
-// ═══════════════════════════════════════
-// MODELS
-// ═══════════════════════════════════════
-
-model User {
-  userId       String   @id
-  fullName     String
-  role         UserRole
-  email        String   @unique
-  passwordHash String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  // Relations
-  storiesCreated  Story[]     @relation("StoryCreator")
-  storiesPolished Story[]     @relation("StoryPolisher")
-  storiesSentBy   Story[]     @relation("StorySender")
-  claimedClips    StoryClip[] @relation("ClipClaimer")
-  auditLogs       AuditLog[]
-
-  createdCgItems CgItem[] @relation("CgCreator")
-  updatedCgItems CgItem[] @relation("CgUpdater")
-  preferences    UserPreferences?
-
-  @@map("users")
-}
-
-model UserPreferences {
-  id            String    @id @default(cuid())
-  userId        String    @unique
-  user          User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  
-  themePreset   String    @default("dark-professional")
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  @@map("user_preferences")
-}
-
-model Story {
-  storyId         String      @id
-  title           String
-  slug            String
-  format          StoryFormat @default(EMPTY)
-  status          StoryStatus @default(DRAFT)
-
-  content         String @default("")
-  rawScript       String @default("")
-  polishedScript  String?
-  anchorScript    String @default("")
-  voiceoverScript String @default("")
-  editorialNotes  String @default("")
-
-  scriptSentToRundown String?
-  sentToRundownId     String?
-  sentToRundownAt     DateTime?
-  sentBy              String?
-
-  polishedBy String?
-  polishedAt DateTime?
-  isPolished Boolean @default(false)
-
-  createdBy       String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  plannedDuration String   @default("00:00:00")
-  rundownId       String?
-  orderIndex      Int      @default(0)
-
-  category String?
-  location String?
-  source   String?
-  language Language @default(en)
-  priority Priority @default(NORMAL)
-
-  // Relations
-  creator  User    @relation("StoryCreator", fields: [createdBy], references: [userId])
-  polisher User?   @relation("StoryPolisher", fields: [polishedBy], references: [userId])
-  sender   User?   @relation("StorySender", fields: [sentBy], references: [userId])
-  rundown  Rundown? @relation(fields: [rundownId], references: [rundownId])
-
-  clips          StoryClip[]
-  rundownEntries RundownEntry[]
-
-  cgItems          CgItem[]
-
-  @@map("stories")
-}
-
-model StoryClip {
-  clipId           String     @id
-  storyId          String
-  fileName         String
-  originalFileName String
-  fileUrl          String?
-  fileSize         Int?
-  fileType         String     @default("video/mp4")
-  displayLabel     String     @default("")
-  duration         String?
-  status           ClipStatus @default(PENDING)
-
-  claimedBy   String?
-  claimedAt   DateTime?
-  completedAt DateTime?
-
-  editingInstructions String @default("")
-  editorialNotes      String @default("")
-
-  // Future fields (Phase 3.5/3.6)
-  codec       String?
-  resolution  String?
-  fps         String?
-  proxyUrl    String?
-  thumbnailUrl String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-
-  // Relations
-  story   Story @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
-  claimer User? @relation("ClipClaimer", fields: [claimedBy], references: [userId])
-
-  @@map("story_clips")
-}
-
-model Rundown {
-  rundownId       String        @id
-  title           String
-  date            String
-  broadcastTime   String
-  plannedDuration String        @default("00:30:00")
-  status          RundownStatus @default(PLANNING)
-  mosStatus       MosStatus     @default(OFFLINE)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-
-  // Relations
-  stories Story[]
-  entries RundownEntry[]
-
-  @@unique([date, broadcastTime])
-  @@map("rundowns")
-}
-
-model RundownEntry {
-  entryId       String        @id
-  rundownId     String
-  storyId       String
-  orderIndex    Int           @default(0)
-  scriptContent String?
-  scriptSource  ScriptSource?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  rundown Rundown @relation(fields: [rundownId], references: [rundownId], onDelete: Cascade)
-  story   Story   @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
-
-  cgItems       CgItem[]
-
-  @@map("rundown_entries")
-}
-
-model AuditLog {
-  id        String   @id @default(uuid())
-  userId    String?
-  action    String
-  entity    String
-  entityId  String
-  oldValue  Json?
-  newValue  Json?
-  metadata  Json?
-  createdAt DateTime @default(now())
-
-  // Relations
-  user User? @relation(fields: [userId], references: [userId])
-
-  @@map("audit_logs")
-}
-
-// ─── CG ITEMS (Phase CG-1 + CG-2) ───────────────────────
-
 enum CgStatus {
   DRAFT
   READY
   ON_AIR
 
   @@map("cg_status")
-}
-
-model CgItem {
-  cgItemId        String   @id
-  storyId         String
-  entryId         String?
-  templateName    String   @default("")
-  concept         String   @default("")
-  variant         String   @default("")
-  dataElementName String   @default("")
-  dataElementId   String?
-  fieldData       Json     @default("{}")
-  mosObjId        String?
-  mosObjXml       String?
-  orderIndex      Int      @default(0)
-  channel         String   @default("GFX1")
-  layer           String   @default("FULL")
-  status          CgStatus @default(DRAFT)
-  createdBy       String
-  updatedBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  story   Story         @relation(fields: [storyId], references: [storyId], onDelete: Cascade)
-  entry   RundownEntry? @relation(fields: [entryId], references: [entryId], onDelete: SetNull)
-  creator User          @relation("CgCreator", fields: [createdBy], references: [userId])
-  updater User?         @relation("CgUpdater", fields: [updatedBy], references: [userId])
-
-  @@map("cg_items")
 }

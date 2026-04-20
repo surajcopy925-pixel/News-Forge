@@ -12,8 +12,9 @@ import { useUsers } from '@/hooks/useUsers';
 import { useCGItems, useCreateCGItem, useUpdateCGItem, useDeleteCGItem, useReorderCGItems } from '@/hooks/useCGItems';
 import type { CgSaveData } from '@/components/TemplateBrowser';
 import { useMosStatus, useMosConnect, useMosDisconnect, useSendRundownToViz } from '@/hooks/useMosBridge';
+import { usePrompterStatus, usePrompterConnect, usePrompterDisconnect, useSendToPrompter } from '@/hooks/usePrompter';
 import TemplateBrowser from '@/components/TemplateBrowser';
-import { Layers, Plus, ExternalLink, Trash2, GripVertical, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Layers, Plus, ExternalLink, Trash2, GripVertical, CheckCircle, Clock, AlertCircle, ScrollText } from 'lucide-react';
 import { generateAllTimeSlots, parseToSeconds, formatSeconds } from '@/utils/metadata';
 import type { Story, StoryClip, RundownEntry } from '@/types/types';
 
@@ -231,15 +232,15 @@ export default function RundownPage() {
 
   /* ═══════ CG ITEMS (needs selectedEntry) ═══════ */
   const { data: cgItems = EMPTY_ARRAY, isLoading: cgLoading } = useCGItems(selectedEntry?.storyId ?? null);
-  const createCgItemMutation = useCreateCGItem();
-  const updateCgItemMutation = useUpdateCGItem();
-  const deleteCgItemMutation = useDeleteCGItem();
-  const reorderCgItemsMutation = useReorderCGItems();
+  const createCGItemMutation = useCreateCGItem();
+  const updateCGItemMutation = useUpdateCGItem();
+  const deleteCGItemMutation = useDeleteCGItem();
+  const reorderCGItemsMutation = useReorderCGItems();
 
   /* ── CG handlers ── */
   const handleSaveCG = useCallback(async (cgData: CgSaveData) => {
     if (!selectedEntry?.storyId) return;
-    await createCgItemMutation.mutateAsync({
+    await createCGItemMutation.mutateAsync({
       storyId: selectedEntry.storyId,
       entryId: selectedEntry.entryId,
       templateName: cgData.templateName || cgData.dataElementName || 'Untitled CG',
@@ -254,22 +255,28 @@ export default function RundownPage() {
       status: 'DRAFT' as any,
       orderIndex: cgItems.length,
     });
-  }, [selectedEntry, createCgItemMutation, cgItems.length]);
+  }, [selectedEntry, createCGItemMutation, cgItems.length]);
 
   const handleDeleteCG = useCallback(async (cgItemId: string) => {
-    await deleteCgItemMutation.mutateAsync(cgItemId);
-  }, [deleteCgItemMutation]);
+    await deleteCGItemMutation.mutateAsync(cgItemId);
+  }, [deleteCGItemMutation]);
 
   const handleReorderCGs = useCallback(async (cgItemIds: string[]) => {
     if (!selectedEntry?.storyId) return;
-    await reorderCgItemsMutation.mutateAsync({ storyId: selectedEntry.storyId, cgItemIds });
-  }, [selectedEntry, reorderCgItemsMutation]);
+    await reorderCGItemsMutation.mutateAsync({ storyId: selectedEntry.storyId, cgItemIds });
+  }, [selectedEntry, reorderCGItemsMutation]);
 
   /* ── MOS Bridge ── */
   const { data: mosStatus } = useMosStatus();
   const mosConnect = useMosConnect();
   const mosDisconnect = useMosDisconnect();
   const sendToViz = useSendRundownToViz();
+
+  /* ── Prompter ── */
+  const { data: prompterStatus } = usePrompterStatus();
+  const prompterConnect = usePrompterConnect();
+  const prompterDisconnect = usePrompterDisconnect();
+  const sendToPrompterMutation = useSendToPrompter();
 
   const handleMosConnect = () => {
     if (mosStatus?.running) {
@@ -288,6 +295,20 @@ export default function RundownPage() {
     if (!selectedRundown || !mosStatus?.connected) return;
     sendToViz.mutate({ rundownId: selectedRundown.rundownId, action: 'replace' });
   };
+
+  const handlePrompterConnect = () => {
+    if (prompterStatus?.listening) {
+      prompterDisconnect.mutate();
+    } else {
+      prompterConnect.mutate();
+    }
+  };
+
+  const handleSendToPrompter = () => {
+    if (!selectedRundown || !prompterStatus?.connected) return;
+    sendToPrompterMutation.mutate(selectedRundown.rundownId);
+  };
+
 
   /* ═══════ 7. AUTO-SELECT ═══════ */
   useEffect(() => {
@@ -630,7 +651,7 @@ export default function RundownPage() {
           {['✏ EDIT', '⊘ DELETE', '⎘ COPY', '↕ MOVE', '🖨 PRINT', '🔍 SEARCH', '📤 EXPORT'].map((l) => (
             <button key={l} className="text-gray-500 hover:text-gray-300 text-[10px] px-1.5 py-1">{l}</button>
           ))}
-          <div className="flex-1" />
+          
           {/* MOS connection status */}
           <div className="flex items-center gap-2 text-[10px]">
             <button
@@ -643,6 +664,7 @@ export default function RundownPage() {
                   ? 'bg-yellow-900/50 text-yellow-400 hover:bg-yellow-900'
                   : 'bg-red-900/30 text-red-400 hover:bg-red-900/50'
               }`}
+              title="Viz MOS Bridge Status"
             >
               <span className={`w-1.5 h-1.5 rounded-full ${
                 mosStatus?.connected
@@ -661,35 +683,79 @@ export default function RundownPage() {
                 ? 'LISTENING'
                 : 'MOS OFFLINE'}
             </button>
-            {mosStatus?.connected && mosStatus.lastHeartbeat && (
-              <span className="text-gray-500 text-[9px]">HB {new Date(mosStatus.lastHeartbeat).toLocaleTimeString()}</span>
-            )}
-            {mosStatus?.running && !mosStatus?.connected && mosStatus?.gatewayIp === null && (
-              <span className="text-yellow-500 text-[9px]">Waiting for Gateway...</span>
-            )}
-            {mosStatus?.lastError && !mosStatus.running && (
-              <span className="text-red-400 text-[9px] truncate max-w-32" title={mosStatus.lastError}>⚠ {mosStatus.lastError.slice(0, 20)}</span>
+          </div>
+
+          <div className="h-4 w-[1px] bg-gray-800 mx-1" />
+
+          {/* Prompter Status */}
+          <div className="flex items-center gap-2 text-[10px]">
+             <button
+              onClick={handlePrompterConnect}
+              disabled={prompterConnect.isPending || prompterDisconnect.isPending}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded font-bold transition-colors ${
+                prompterStatus?.connected
+                  ? 'bg-purple-900/50 text-purple-300 hover:bg-purple-900'
+                  : prompterStatus?.listening
+                  ? 'bg-blue-900/30 text-blue-400 hover:bg-blue-900/50'
+                  : 'bg-gray-800/50 text-gray-500 hover:bg-gray-800'
+              }`}
+              title="Teleprompter MOS Server"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                prompterStatus?.connected
+                  ? 'bg-purple-400 animate-pulse'
+                  : prompterStatus?.listening
+                  ? 'bg-blue-400 animate-pulse'
+                  : 'bg-gray-600'
+              }`} />
+              {prompterConnect.isPending
+                ? 'Starting...'
+                : prompterDisconnect.isPending
+                ? 'Stopping...'
+                : prompterStatus?.connected
+                ? 'PROMPTER OK'
+                : prompterStatus?.listening
+                ? 'PDS READY'
+                : 'PDS OFF'}
+            </button>
+
+            {prompterStatus?.connected && (
+              <button
+                onClick={handleSendToPrompter}
+                disabled={sendToPrompterMutation.isPending}
+                className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold px-2 py-1 rounded transition-colors disabled:opacity-50"
+              >
+                {sendToPrompterMutation.isPending ? '⏳ SENDING...' : <><ScrollText size={12} /> PUSH SCRIPT</>}
+              </button>
             )}
           </div>
+
+          <div className="flex-1" />
+          
           {/* RUN LIVE */}
-          {sendToViz.isSuccess && mosStatus?.connected && (
-            <button onClick={handleUpdateViz} className="text-orange-400 border border-orange-400/40 hover:bg-orange-900/20 text-[10px] font-bold px-2 py-1 rounded">
-              UPDATE VIZ
+          <div className="flex items-center gap-2">
+            {sendToViz.isSuccess && mosStatus?.connected && (
+              <button 
+                onClick={handleUpdateViz} 
+                className="text-orange-400 border border-orange-400/40 hover:bg-orange-900/20 text-[10px] font-bold px-2 py-1 rounded transition-colors"
+              >
+                UPDATE VIZ
+              </button>
+            )}
+            <button
+              onClick={handleGoLive}
+              disabled={!selectedRundown || !mosStatus?.connected || sendToViz.isPending}
+              className={`text-[10px] font-bold px-3 py-1 rounded transition-colors ${
+                mosStatus?.connected && selectedRundown
+                  ? sendToViz.isSuccess
+                    ? 'bg-green-600 text-white hover:bg-green-700'
+                    : 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              {sendToViz.isPending ? '⏳ SENDING...' : sendToViz.isSuccess ? '✓ SENT' : 'RUN LIVE'}
             </button>
-          )}
-          <button
-            onClick={handleGoLive}
-            disabled={!selectedRundown || !mosStatus?.connected || sendToViz.isPending}
-            className={`text-[10px] font-bold px-3 py-1 rounded transition-colors ${
-              mosStatus?.connected && selectedRundown
-                ? sendToViz.isSuccess
-                  ? 'bg-green-600 text-white hover:bg-green-700'
-                  : 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-            }`}
-          >
-            {sendToViz.isPending ? '⏳ SENDING...' : sendToViz.isSuccess ? '✓ SENT' : 'RUN LIVE'}
-          </button>
+          </div>
         </div>
 
         {/* ── CHANGE 4: Rundown info bar with dropdown ── */}
@@ -991,7 +1057,7 @@ export default function RundownPage() {
                                 {['DRAFT', 'READY', 'ON_AIR'].map((s) => (
                                   <button
                                     key={s}
-                                    onClick={() => updateCgItemMutation.mutate({ cgItemId: cg.cgItemId, data: { status: s as any } })}
+                                    onClick={() => updateCGItemMutation.mutate({ cgItemId: cg.cgItemId, data: { status: s as any } })}
                                     className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${
                                       cg.status === s 
                                         ? s === 'ON_AIR' ? 'bg-red-600 text-white' : s === 'READY' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
@@ -1003,7 +1069,7 @@ export default function RundownPage() {
                                 ))}
                               </div>
                               <button 
-                                onClick={() => deleteCgItemMutation.mutate(cg.cgItemId)}
+                                onClick={() => deleteCGItemMutation.mutate(cg.cgItemId)}
                                 className="p-1.5 text-gray-500 hover:text-red-400 transition-colors"
                               >
                                 <Trash2 size={14} />
