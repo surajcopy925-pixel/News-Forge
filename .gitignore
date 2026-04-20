@@ -58,3 +58,6 @@ next-env.d.ts
 /playwright-report
 
 # Misc
+
+# Cache
+.prompter-cache.json

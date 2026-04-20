@@ -304,6 +304,7 @@ export class MosBridge {
 
     if (xml.includes('<heartbeat>')) {
       this.status.lastHeartbeatReceived = new Date().toISOString();
+      // Heartbeat with timestamp — also compact
       const reply = this.wrapMos(`<heartbeat><time>${new Date().toISOString()}</time></heartbeat>`);
       if (port === 'lower') { this.sendOnLower(reply); } else { this.sendOnUpper(reply); }
       return;
@@ -373,8 +374,10 @@ export class MosBridge {
   }
 
   // ─── MOS XML Wrapper ──────────────────────────────────
-  private wrapMos(body: string, mosIdOverride?: string): string {
-    return `<mos>\n  <mosID>${mosIdOverride || MOS_DEVICE_ID}</mosID>\n  <ncsID>${MOS_NCS_ID}</ncsID>\n  ${body}\n</mos>\n`;
+  private wrapMos(body: string, mosIdOverride?: string, ncsIdOverride?: string, messageId?: number): string {
+    const mid = messageId ? `<messageID>${messageId}</messageID>` : '';
+    // Use UTF-16 in declaration to match transmission format
+    return `<?xml version="1.0" encoding="UTF-16"?><mos><mosID>${mosIdOverride || MOS_DEVICE_ID}</mosID><ncsID>${ncsIdOverride || MOS_NCS_ID}</ncsID>${mid}${body}</mos>`;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -468,15 +471,31 @@ export class MosBridge {
   // These send script text updates to the prompter
   // ============================================
 
+  buildPrompterRoCreate(
+    roId: string, 
+    roSlug: string, 
+    stories: MosPrompterStory[],
+    ncsIdOverride?: string,
+    mosIdOverride?: string,
+    messageId?: number
+  ): string {
+    const storiesXml = stories.map((s, i) => this.buildPrompterStoryXml(s, i + 1)).join('');
+    const xml = `<roCreate><roID>${this.esc(roId)}</roID><roSlug>${this.esc(roSlug)}</roSlug><roStatus>NEW</roStatus><roChannel>${PROMPTER_MOS_ID}</roChannel>${storiesXml}</roCreate>`;
+    return this.wrapMos(xml, mosIdOverride || PROMPTER_MOS_ID, ncsIdOverride, messageId);
+  }
+
   /**
-   * Creates a full rundown for the teleprompter
+   * Individual story content send for legacy WinPlus compliance
    */
-  buildPrompterRoCreate(roId: string, roSlug: string, stories: MosPrompterStory[]): string {
-    return this.wrapMos(`<roCreate>
-        <roID>${this.esc(roId)}</roID>
-        <roSlug>${this.esc(roSlug)}</roSlug>
-        ${stories.map((s) => this.buildPrompterStoryXml(s)).join('\n')}
-      </roCreate>`, PROMPTER_MOS_ID);
+  buildPrompterRoStorySend(
+    roId: string,
+    story: MosPrompterStory,
+    ncsIdOverride?: string,
+    mosIdOverride?: string,
+    messageId?: number
+  ): string {
+    const xml = `<roStorySend><roID>${this.esc(roId)}</roID>${this.buildPrompterStoryXml(story)}</roStorySend>`;
+    return this.wrapMos(xml, mosIdOverride || PROMPTER_MOS_ID, ncsIdOverride, messageId);
   }
 
 
@@ -484,23 +503,35 @@ export class MosBridge {
    * Replaces a single story's script on the teleprompter
    * Used when a producer edits a script
    */
-  buildPrompterStoryReplace(roId: string, story: MosPrompterStory): string {
+  buildPrompterStoryReplace(
+    roId: string, 
+    story: MosPrompterStory,
+    ncsIdOverride?: string,
+    mosIdOverride?: string,
+    messageId?: number
+  ): string {
     return this.wrapMos(`<roStoryReplace>
         <roID>${this.esc(roId)}</roID>
         <storyID>${this.esc(story.storyId)}</storyID>
         ${this.buildPrompterStoryXml(story)}
-      </roStoryReplace>`, PROMPTER_MOS_ID);
+      </roStoryReplace>`, mosIdOverride || PROMPTER_MOS_ID, ncsIdOverride, messageId);
   }
 
   /**
    * Deletes a story from the teleprompter rundown
    * Used when a story is removed
    */
-  buildPrompterStoryDelete(roId: string, storyId: string): string {
+  buildPrompterStoryDelete(
+    roId: string, 
+    storyId: string,
+    ncsIdOverride?: string,
+    mosIdOverride?: string,
+    messageId?: number
+  ): string {
     return this.wrapMos(`<roStoryDelete>
         <roID>${this.esc(roId)}</roID>
         <storyID>${this.esc(storyId)}</storyID>
-      </roStoryDelete>`, PROMPTER_MOS_ID);
+      </roStoryDelete>`, mosIdOverride || PROMPTER_MOS_ID, ncsIdOverride, messageId);
   }
 
   /**
@@ -511,13 +542,16 @@ export class MosBridge {
   buildPrompterStoryInsert(
     roId: string,
     afterStoryId: string,
-    story: MosPrompterStory
+    story: MosPrompterStory,
+    ncsIdOverride?: string,
+    mosIdOverride?: string,
+    messageId?: number
   ): string {
     return this.wrapMos(`<roStoryInsert>
         <roID>${this.esc(roId)}</roID>
         <storyID>${this.esc(afterStoryId)}</storyID>
         ${this.buildPrompterStoryXml(story)}
-      </roStoryInsert>`, PROMPTER_MOS_ID);
+      </roStoryInsert>`, mosIdOverride || PROMPTER_MOS_ID, ncsIdOverride, messageId);
   }
 
   /**
@@ -541,14 +575,18 @@ export class MosBridge {
    * Unlike buildStoryXml(), this sends clean script text
    * instead of CG/Vizrt items
    */
-  private buildPrompterStoryXml(story: MosPrompterStory): string {
+  private buildPrompterStoryXml(story: MosPrompterStory, storyNum: number = 1): string {
+    const cleanedText = this.cleanText(story.scriptText);
+    // storyBody/storyText is the correct MOS element for teleprompter scroll text.
+    // item/itemBody is for MOS graphics objects (CG), not for prompter copy.
     return `<story>
-        <storyID>${this.esc(story.storyId)}</storyID>
-        <storySlug>${this.esc(story.storySlug)}</storySlug>
-        <storyBody>
-          <storyText>${this.esc(this.cleanText(story.scriptText))}</storyText>
-        </storyBody>
-      </story>`;
+<storyID>${this.esc(story.storyId)}</storyID>
+<storySlug>${this.esc(story.storySlug)}</storySlug>
+<storyNum>${storyNum}</storyNum>
+<storyBody>
+<storyText>${this.esc(cleanedText)}</storyText>
+</storyBody>
+</story>`;
   }
 
   /**

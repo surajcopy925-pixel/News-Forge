@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     console.log(`[prompter/send] Sending "${title}": ${storyList.length} stories (${withScript} with script)`);
 
     // Send to prompter
-    const result = await prompterClient.sendRundown(
+    const sent = await prompterClient.sendRundown(
       rundown.rundownId,
       title,
       storyList.map(s => ({
@@ -93,8 +93,10 @@ export async function POST(req: NextRequest) {
     );
 
     return NextResponse.json({
-      success: result.success,
-      message: result.message,
+      success: sent,
+      message: sent
+        ? `Sent "${title}" (${storyList.length} stories, ${withScript} with script)`
+        : 'Failed to send — is the prompter connected?',
       rundownTitle: title,
       totalStories: storyList.length,
       storiesWithScript: withScript,
