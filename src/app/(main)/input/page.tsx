@@ -18,6 +18,7 @@ import {
   detectLanguage,
   formatDuration,
 } from '@/utils/metadata';
+import { toast } from 'sonner';
 
 /* ── CONSTANTS ── */
 const EMPTY_ARRAY: any[] = [];
@@ -187,7 +188,7 @@ export default function InputPage() {
 
       } catch (error: any) {
         console.error('Failed to upload/create clip:', error.message);
-        alert(`Failed to upload ${file.name}: ${error.message}`);
+        toast.error(`Failed to upload ${file.name}: ${error.message}`);
       }
     }
 
@@ -197,7 +198,10 @@ export default function InputPage() {
 
   /* ── create or update story ── */
   const handleCreateOrUpdateStory = async (shouldSubmit: boolean) => {
-    if (!formTitle) return alert('Title is required');
+    if (!formTitle) {
+      toast.error('Title is required');
+      return;
+    }
 
     const language = detectLanguage(formTitle + ' ' + formContent);
 
@@ -247,11 +251,11 @@ export default function InputPage() {
       }
 
       if (shouldSubmit) {
-        alert('Story submitted successfully!');
+        toast.success('Story submitted successfully!');
       }
     } catch (error: any) {
       console.error('Failed to save story:', error.message);
-      alert('Failed to save story: ' + error.message);
+      toast.error('Failed to save story: ' + error.message);
     }
   };
 

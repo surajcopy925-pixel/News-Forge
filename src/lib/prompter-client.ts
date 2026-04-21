@@ -10,10 +10,11 @@ const CACHE_FILE = path.join(process.cwd(), '.prompter-cache.json');
 
 class PrompterClient {
   private server: net.Server | null = null;
-  private clientSocket: net.Socket | null = null;
-  private connected = false;
+  private clientSocket: net.Socket | null = null;   // incoming socket from WinPlus (for roReq handling)
+  private connected = false;     // WinPlus has contacted our server at least once
   private listening = false;
-  private port: number;
+  private port: number;          // port we listen on (and WinPlus listens on for push)
+  private prompterHost: string;  // WinPlus machine IP (PROMPTER_HOST)
   private ncsId: string;
   private prompterId: string;
   private heartbeatInterval: NodeJS.Timeout | null = null;
@@ -25,6 +26,7 @@ class PrompterClient {
 
   constructor() {
     this.port = parseInt(process.env.PROMPTER_PORT || '10541');
+    this.prompterHost = process.env.PROMPTER_HOST || '';
     this.ncsId = process.env.MOS_NCS_ID || 'NEWSFORGE';
     this.prompterId = process.env.PROMPTER_MOS_ID || 'PROMPTER';
     this.loadCache();
@@ -36,8 +38,8 @@ class PrompterClient {
     try {
       if (fs.existsSync(CACHE_FILE)) {
         const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-        if (data.lastRundownXml) this.lastRundownXml = data.lastRundownXml;
         if (data.activeRundownId) this.activeRundownId = data.activeRundownId;
+        if (data.lastRundownData) this.lastRundownData = data.lastRundownData;
         if (typeof data.messageCounter === 'number') this.messageCounter = data.messageCounter;
         console.log(`[PROMPTER] CACHE_LOADED: Restored ${data.activeRundownId}, msgCount: ${this.messageCounter}`);
       }
@@ -289,9 +291,9 @@ class PrompterClient {
     // ── Specific rundown request
     if (lower.includes('roreq')) {
       this.log('RO_REQUEST', 'WinPlus requested a specific rundown');
-      if (this.lastRundownXml) {
-        this.log('AUTO_RESEND', 'Sending cached rundown in response to roReq');
-        this.sendRaw(this.lastRundownXml);
+      if (this.lastRundownData) {
+        this.log('AUTO_RESEND', 'Re-sending cached rundown in response to roReq');
+        this.sendRundown(this.lastRundownData.id, this.lastRundownData.slug, this.lastRundownData.stories);
       }
       return;
     }
@@ -349,106 +351,146 @@ class PrompterClient {
     }
   }
 
+  /**
+   * Opens a short-lived TCP connection TO WinPlus (push model).
+   *
+   * Per WinPlus docs: "WinPlus will LISTEN on this port for MOS messages from NCSs."
+   * We (NCS) are the CLIENT. We connect to WinPlus:PROMPTER_PORT, push all messages,
+   * then close. This is the correct push architecture for roCreate + roStorySend.
+   */
+  private pushToWinPlus(xmlMessages: string[]): Promise<boolean> {
+    if (!this.prompterHost) {
+      this.log('PUSH_ERROR', 'PROMPTER_HOST is not set in .env');
+      return Promise.resolve(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const socket = new net.Socket();
+      socket.setTimeout(15000);
+
+      let done = false;
+      const finish = (success: boolean) => {
+        if (done) return;
+        done = true;
+        try { socket.destroy(); } catch {}
+        resolve(success);
+      };
+
+      socket.on('error', (err) => {
+        this.log('PUSH_ERROR', `Cannot reach WinPlus at ${this.prompterHost}:${this.port} — ${err.message}`);
+        finish(false);
+      });
+
+      socket.on('timeout', () => {
+        this.log('PUSH_TIMEOUT', `Connection to WinPlus timed out`);
+        finish(false);
+      });
+
+      // WinPlus closing the connection means it processed our messages
+      socket.on('close', () => finish(true));
+
+      // Log any ACK/response from WinPlus
+      let inBuffer = '';
+      socket.on('data', (data) => {
+        inBuffer += this.decodeBuffer(data);
+        this.log('PUSH_RECV', inBuffer.substring(0, 120));
+        inBuffer = '';
+      });
+
+      socket.connect(this.port, this.prompterHost, async () => {
+        this.log('PUSH_CONNECTED', `Connected to WinPlus at ${this.prompterHost}:${this.port}`);
+        try {
+          for (let i = 0; i < xmlMessages.length; i++) {
+            const buf = this.toBEBuffer(xmlMessages[i]);
+            // Use write with callback to ensure data is flushed before proceeding
+            await new Promise<void>((res, rej) =>
+              socket.write(buf, (err) => err ? rej(err) : res())
+            );
+            const preview = xmlMessages[i].replace(/\s+/g, ' ').substring(0, 100);
+            this.log('PUSH_SENT', preview + (xmlMessages[i].length > 100 ? '...' : ''));
+            this.saveCache();
+
+            // Small gap between messages so WinPlus can parse each one sequentially.
+            // roCreate must be processed BEFORE roStorySend to avoid "Message Hold Off" discard.
+            if (i === 0 && xmlMessages.length > 1) {
+              await new Promise(r => setTimeout(r, 600)); // longer gap after roCreate
+            } else if (i < xmlMessages.length - 1) {
+              await new Promise(r => setTimeout(r, 80));  // between roStorySend messages
+            }
+          }
+          // Give WinPlus time to send ACK before we close
+          await new Promise(r => setTimeout(r, 1000));
+          finish(true);
+        } catch (err) {
+          this.log('PUSH_WRITE_ERROR', String(err));
+          finish(false);
+        }
+      });
+    });
+  }
+
   async sendRundown(
     rundownId: string,
     rundownSlug: string,
     stories: MosPrompterStory[]
   ): Promise<boolean> {
-    if (!this.connected) {
-      this.log('SEND_FAILED', 'WinPlus is not connected. Start the server and connect WinPlus first.');
+    if (!this.prompterHost) {
+      this.log('SEND_FAILED', 'PROMPTER_HOST not configured in .env');
       return false;
     }
 
     this.activeRundownId = rundownId;
 
-    // STEP 1: Tell WinPlus this rundown exists via roListAll
-    // WinPlus processes this to populate "MOS Active Run Orders"
-    const listAll = `<?xml version="1.0" encoding="UTF-8"?>\n<mos><mosID>${this.prompterId}</mosID><ncsID>${this.ncsId}</ncsID><messageID>${this.messageCounter++}</messageID><roListAll><roID>${rundownId}</roID></roListAll></mos>`;
-    this.sendRaw(listAll);
-    this.log('RUNDOWN_ANNOUNCED', `Announced rundown "${rundownSlug}" (${rundownId}) in roListAll`);
+    // Build all messages upfront
+    const messages: string[] = [];
 
-    // Small delay to let WinPlus process roListAll before receiving roCreate
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Message 1: roCreate — blank skeleton (WinPlus docs: "creates a blank entry for each story")
+    messages.push(mosBridge.buildPrompterRoCreate(
+      rundownId, rundownSlug, stories,
+      this.ncsId, this.prompterId, this.messageCounter++
+    ));
 
-    // STEP 2: Send roCreate (Structure)
-    const roCreateXml = mosBridge.buildPrompterRoCreate(
-      rundownId,
-      rundownSlug,
-      stories,
-      this.ncsId,
-      this.prompterId,
-      this.messageCounter++
-    );
-    this.sendRaw(roCreateXml);
-
-    // STEP 3: Send individual roStorySend for each story (Content)
-    // As per WinPlus docs: "initially send roCreate... Each story is then sent using roStorySend"
-    for (const story of stories) {
-      const storySendXml = mosBridge.buildPrompterRoStorySend(
-        rundownId,
-        story,
-        this.ncsId,
-        this.prompterId,
-        this.messageCounter++
-      );
-      this.sendRaw(storySendXml);
-      // Tiny delay between stories to avoid flooding the incoming buffer
-      await new Promise(r => setTimeout(r, 50));
+    // Messages 2..N+1: roStorySend per story (flat MOS 2.8.4 format)
+    for (let i = 0; i < stories.length; i++) {
+      messages.push(mosBridge.buildPrompterRoStorySend(
+        rundownId, stories[i], i + 1,
+        this.ncsId, this.prompterId, this.messageCounter++
+      ));
     }
 
-    this.lastRundownData = { id: rundownId, slug: rundownSlug, stories };
-    this.log('RUNDOWN_SENT', `Sent "${rundownSlug}" structure + ${stories.length} stories`);
-    return true;
+    this.log('PUSH_START', `Pushing "${rundownSlug}" to WinPlus (${stories.length} stories)`);
+
+    // PUSH to WinPlus — we connect TO WinPlus:10541 as a client
+    const success = await this.pushToWinPlus(messages);
+
+    if (success) {
+      this.lastRundownData = { id: rundownId, slug: rundownSlug, stories };
+      this.log('RUNDOWN_SENT', `Pushed "${rundownSlug}" — ${stories.length} stories to WinPlus`);
+    } else {
+      this.log('RUNDOWN_FAILED', `Failed to push "${rundownSlug}" to WinPlus`);
+    }
+    return success;
   }
 
-  async sendStoryUpdate(
-    rundownId: string,
-    story: MosPrompterStory
-  ): Promise<boolean> {
-    if (!this.connected) return false;
-
+  async sendStoryUpdate(rundownId: string, story: MosPrompterStory): Promise<boolean> {
     const xml = mosBridge.buildPrompterStoryReplace(
-      rundownId, 
-      story,
-      this.ncsId,
-      this.prompterId,
-      this.messageCounter++
+      rundownId, story, this.ncsId, this.prompterId, this.messageCounter++
     );
-    return this.sendRaw(xml);
+    return this.pushToWinPlus([xml]);
   }
 
-  async sendStoryDelete(
-    rundownId: string,
-    storyId: string
-  ): Promise<boolean> {
-    if (!this.connected) return false;
-
+  async sendStoryDelete(rundownId: string, storyId: string): Promise<boolean> {
     const xml = mosBridge.buildPrompterStoryDelete(
-      rundownId, 
-      storyId,
-      this.ncsId,
-      this.prompterId,
-      this.messageCounter++
+      rundownId, storyId, this.ncsId, this.prompterId, this.messageCounter++
     );
-    return this.sendRaw(xml);
+    return this.pushToWinPlus([xml]);
   }
 
-  async sendStoryInsert(
-    rundownId: string,
-    afterStoryId: string,
-    story: MosPrompterStory
-  ): Promise<boolean> {
-    if (!this.connected) return false;
-
+  async sendStoryInsert(rundownId: string, afterStoryId: string, story: MosPrompterStory): Promise<boolean> {
     const xml = mosBridge.buildPrompterStoryInsert(
-      rundownId, 
-      afterStoryId, 
-      story,
-      this.ncsId,
-      this.prompterId,
-      this.messageCounter++
+      rundownId, afterStoryId, story, this.ncsId, this.prompterId, this.messageCounter++
     );
-    return this.sendRaw(xml);
+    return this.pushToWinPlus([xml]);
   }
 
   // ==================== HEARTBEAT ====================
@@ -509,7 +551,9 @@ private sendHeartbeatResponse() {
   }
 
   isConnected(): boolean {
-    return this.connected;
+    // With push model, we can send to WinPlus as long as PROMPTER_HOST is configured.
+    // The server being active (WinPlus connected to us) is a bonus for pull/auto-resend.
+    return !!this.prompterHost;
   }
 
   getStatus() {

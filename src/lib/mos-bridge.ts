@@ -472,29 +472,49 @@ export class MosBridge {
   // ============================================
 
   buildPrompterRoCreate(
-    roId: string, 
-    roSlug: string, 
+    roId: string,
+    roSlug: string,
     stories: MosPrompterStory[],
     ncsIdOverride?: string,
     mosIdOverride?: string,
     messageId?: number
   ): string {
-    const storiesXml = stories.map((s, i) => this.buildPrompterStoryXml(s, i + 1)).join('');
-    const xml = `<roCreate><roID>${this.esc(roId)}</roID><roSlug>${this.esc(roSlug)}</roSlug><roStatus>NEW</roStatus><roChannel>${PROMPTER_MOS_ID}</roChannel>${storiesXml}</roCreate>`;
+    // roCreate = STRUCTURE ONLY per WinPlus docs.
+    // "This will create a blank entry for each story in the WinPlus Run Order."
+    // Story text is delivered separately via roStorySend.
+    const storiesXml = stories.map((s, i) =>
+      `<roStory><storyID>${this.esc(s.storyId)}</storyID><storySlug>${this.esc(s.storySlug)}</storySlug><storyNum>${i + 1}</storyNum></roStory>`
+    ).join('');
+    const xml = `<roCreate><roID>${this.esc(roId)}</roID><roSlug>${this.esc(roSlug)}</roSlug><roChannel>${PROMPTER_MOS_ID}</roChannel>${storiesXml}</roCreate>`;
     return this.wrapMos(xml, mosIdOverride || PROMPTER_MOS_ID, ncsIdOverride, messageId);
   }
 
   /**
-   * Individual story content send for legacy WinPlus compliance
+   * roStorySend — delivers actual script text to WinPlus for a story.
+   *
+   * IMPORTANT: Per MOS 2.8.4 spec and WinPlus docs, storyID / storySlug / storyNum /
+   * storyBody must be DIRECT children of <roStorySend> — NOT wrapped in a <story> element.
+   * Wrapping in <story> causes WinPlus to silently discard the message.
    */
   buildPrompterRoStorySend(
     roId: string,
     story: MosPrompterStory,
+    storyNum: number = 1,
     ncsIdOverride?: string,
     mosIdOverride?: string,
     messageId?: number
   ): string {
-    const xml = `<roStorySend><roID>${this.esc(roId)}</roID>${this.buildPrompterStoryXml(story)}</roStorySend>`;
+    const cleanedText = this.cleanText(story.scriptText);
+    // Split on paragraph breaks so each paragraph becomes its own <p> tag.
+    const paragraphs = cleanedText
+      .split(/\n{2,}/)
+      .map(para => para.replace(/\n/g, ' ').trim())
+      .filter(para => para.length > 0);
+    const bodyContent = paragraphs.length > 0
+      ? paragraphs.map(p => `<p>${this.esc(p)}</p>`).join('')
+      : `<p></p>`;
+    // FLAT format — no <story> wrapper (per MOS 2.8.4 + WinPlus spec)
+    const xml = `<roStorySend><roID>${this.esc(roId)}</roID><storyID>${this.esc(story.storyId)}</storyID><storySlug>${this.esc(story.storySlug)}</storySlug><storyNum>${storyNum}</storyNum><storyBody>${bodyContent}</storyBody></roStorySend>`;
     return this.wrapMos(xml, mosIdOverride || PROMPTER_MOS_ID, ncsIdOverride, messageId);
   }
 
@@ -577,16 +597,9 @@ export class MosBridge {
    */
   private buildPrompterStoryXml(story: MosPrompterStory, storyNum: number = 1): string {
     const cleanedText = this.cleanText(story.scriptText);
-    // storyBody/storyText is the correct MOS element for teleprompter scroll text.
-    // item/itemBody is for MOS graphics objects (CG), not for prompter copy.
-    return `<story>
-<storyID>${this.esc(story.storyId)}</storyID>
-<storySlug>${this.esc(story.storySlug)}</storySlug>
-<storyNum>${storyNum}</storyNum>
-<storyBody>
-<storyText>${this.esc(cleanedText)}</storyText>
-</storyBody>
-</story>`;
+    // Used by roStoryReplace and roStoryInsert — <story> with <storyBody><p> content.
+    // WinPlus rejects <storyText>; the correct tag is <p> inside <storyBody>.
+    return `<story><storyID>${this.esc(story.storyId)}</storyID><storySlug>${this.esc(story.storySlug)}</storySlug><storyNum>${storyNum}</storyNum><storyBody><p>${this.esc(cleanedText)}</p></storyBody></story>`;
   }
 
   /**

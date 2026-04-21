@@ -14,6 +14,7 @@ import type { CgSaveData } from '@/components/TemplateBrowser';
 import { useMosStatus, useMosConnect, useMosDisconnect, useSendRundownToViz } from '@/hooks/useMosBridge';
 import { usePrompterStatus, usePrompterConnect, usePrompterDisconnect, useSendToPrompter } from '@/hooks/usePrompter';
 import TemplateBrowser from '@/components/TemplateBrowser';
+import { toast } from 'sonner';
 import { Layers, Plus, ExternalLink, Trash2, GripVertical, CheckCircle, Clock, AlertCircle, ScrollText } from 'lucide-react';
 import { generateAllTimeSlots, parseToSeconds, formatSeconds } from '@/utils/metadata';
 import type { Story, StoryClip, RundownEntry } from '@/types/types';
@@ -127,10 +128,9 @@ export default function RundownPage() {
 
   /* ── create form ── */
   const [nTitle, setNTitle] = useState('');
-  const [nSlug, setNSlug] = useState('');
   const [nFormat, setNFormat] = useState<Story['format']>('');
-  const [nDur, setNDur] = useState('00:00:00');
-  const [nContent, setNContent] = useState('');
+
+  /* ── refs ── */
 
   /* ── detail editing ── */
   const [eAnchor, setEAnchor] = useState('');
@@ -325,6 +325,33 @@ export default function RundownPage() {
     setSelectedRundownId(best.rundownId);
   }, [allRundowns]);
 
+  /* ── Task: Rotate List Utility ── */
+  const rotateToCurrentTime = useCallback(<T extends { broadcastTime?: string }>(slots: T[]): T[] => {
+    if (!slots || slots.length === 0) return slots;
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    let bestIndex = 0;
+    let bestDiff = Infinity;
+
+    slots.forEach((slot, index) => {
+      const timeStr = slot.broadcastTime || '';
+      if (!timeStr) return;
+
+      const parts = timeStr.split(':').map(Number);
+      const slotMinutes = parts[0] * 60 + (parts[1] || 0);
+
+      const diff = currentMinutes - slotMinutes;
+      if (diff >= 0 && diff < bestDiff) {
+        bestDiff = diff;
+        bestIndex = index;
+      }
+    });
+
+    return [...slots.slice(bestIndex), ...slots.slice(0, bestIndex)];
+  }, []);
+
   useEffect(() => {
     if (!selectedRundownId) return;
     const params = new URLSearchParams(window.location.search);
@@ -382,9 +409,10 @@ export default function RundownPage() {
         storyId: sid,
         data: { anchorScript: eAnchor, voiceoverScript: eVO, editorialNotes: eNotes },
       });
+      toast.success('Story updated successfully');
     } catch (error: any) {
-      console.error('Save failed:', error.message);
-      alert('Save failed: ' + error.message);
+      console.error('Save failed:', error);
+      toast.error('Save failed: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -395,8 +423,10 @@ export default function RundownPage() {
     try {
       await deleteEntryMutation.mutateAsync({ rundownId: realId, entryId: id });
       if (selectedEntryId === id) { setSelectedEntryId(null); setDetailOpen(false); }
+      toast.success('Entry removed from rundown');
     } catch (error: any) {
-      console.error('Delete failed:', error.message);
+      console.error('Delete failed:', error);
+      toast.error('Failed to remove entry: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -422,8 +452,10 @@ export default function RundownPage() {
       if (realId && nonSystemIds.length > 0) {
         try {
           await reorderEntriesMutation.mutateAsync({ rundownId: realId, entryIds: nonSystemIds });
+          toast.success('Rundown reordered');
         } catch (error: any) {
-          console.error('Reorder failed:', error.message);
+          console.error('Reorder failed:', error);
+          toast.error('Failed to reorder: ' + (error.message || 'Unknown error'));
         }
       }
     }
@@ -456,10 +488,11 @@ export default function RundownPage() {
     try {
       const quickStory = await createStoryMutation.mutateAsync({
         title: nTitle,
-        slug: nSlug || nTitle.toUpperCase().replace(/\s+/g, '_').slice(0, 20),
+        slug: nTitle.toUpperCase().replace(/\s+/g, '_').slice(0, 20),
         category: 'General', location: 'Newsroom', source: 'Internal',
-        format: nFormat || undefined, status: 'DRAFT', content: nContent,
-        priority: 'NORMAL', createdBy: userId, plannedDuration: nDur,
+        format: nFormat || undefined, status: 'DRAFT', content: '',
+        priority: 'NORMAL', createdBy: userId, plannedDuration: '00:00:00',
+        date: selectedDate,
         language: 'en'
       } as any);
       const realRundownId = await ensureRundownExists(selectedRundownId);
@@ -467,11 +500,12 @@ export default function RundownPage() {
         rundownId: realRundownId,
         storyId: quickStory.storyId,
       });
-      setNTitle(''); setNSlug(''); setNFormat(''); setNDur('00:00:00'); setNContent('');
+      setNTitle(''); setNFormat('');
       setShowCreateModal(false);
+      toast.success('Story created and added to rundown');
     } catch (error: any) {
-      console.error('Create failed:', error.message);
-      alert('Failed to create story: ' + error.message);
+      console.error('Create failed:', error);
+      toast.error('Failed to create story: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -496,9 +530,10 @@ export default function RundownPage() {
         data: { rundownId: realRundownId },
       });
       setShowAddModal(false); setAddSearch('');
+      toast.success('Story added to rundown');
     } catch (error: any) {
-      console.error('Add failed:', error.message);
-      alert('Failed to add story: ' + error.message);
+      console.error('Add failed:', error);
+      toast.error('Failed to add story: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -591,12 +626,13 @@ export default function RundownPage() {
             />
           </div>
           <div className="flex-1 overflow-y-auto">
-            {filteredRundowns.map((rd) => {
+            {(selectedDate === new Date().toISOString().split('T')[0] ? rotateToCurrentTime(filteredRundowns) : filteredRundowns).map((rd) => {
               const sel = rd.rundownId === selectedRundownId;
               const sc = storyCount(rd.rundownId);
               return (
                 <div
-                  key={rd.rundownId} onClick={() => selectRd(rd.rundownId)}
+                  key={rd.rundownId} 
+                  onClick={() => selectRd(rd.rundownId)}
                   className={`px-2 py-1.5 cursor-pointer border-b border-gray-800/40 transition-colors ${sel ? 'bg-blue-900/30 border-l-[3px] border-l-blue-500' : 'hover:bg-gray-800/30 border-l-[3px] border-l-transparent'}`}
                 >
                   <div className="font-semibold text-[11px] truncate leading-tight">{rd.title}</div>
@@ -1097,10 +1133,6 @@ export default function RundownPage() {
                 <label className="text-[9px] text-gray-500">Title *</label>
                 <input value={nTitle} onChange={(e) => setNTitle(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px]" placeholder="Story title..." />
               </div>
-              <div>
-                <label className="text-[9px] text-gray-500">Slug</label>
-                <input value={nSlug} onChange={(e) => setNSlug(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px]" placeholder="SLUG_NAME" />
-              </div>
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="text-[9px] text-gray-500">Format</label>
@@ -1111,13 +1143,20 @@ export default function RundownPage() {
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="text-[9px] text-gray-500">Planned Duration</label>
-                  <input value={nDur} onChange={(e) => setNDur(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] font-mono" />
+                  <label className="text-[9px] text-gray-500 uppercase font-bold">Planned Date</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                    className="w-full bg-gray-800/30 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] text-gray-400 cursor-not-allowed opacity-80"
+                    title="Auto-detected from selected rundown date"
+                  />
                 </div>
-              </div>
-              <div>
-                <label className="text-[9px] text-gray-500">Content</label>
-                <textarea value={nContent} onChange={(e) => setNContent(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] h-16 resize-none" placeholder="Script content..." />
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-3">

@@ -13,6 +13,7 @@ import { useRundowns, useCreateRundown } from '@/hooks/useRundowns';
 import type { Story, StoryClip } from '@/types/types';
 import VideoPreview from '@/components/VideoPreview';
 import { formatDuration, generateAllTimeSlots } from '@/utils/metadata';
+import { toast } from 'sonner';
 
 const EMPTY_ARRAY: any[] = [];
 
@@ -175,7 +176,7 @@ export default function EditorHubPage() {
             });
         } catch (error: any) {
             console.error('Failed to claim clip:', error.message);
-            alert('Failed to claim clip: ' + error.message);
+            toast.error('Failed to claim clip: ' + error.message);
         } finally {
             setIsClaiming(false);
         }
@@ -183,7 +184,7 @@ export default function EditorHubPage() {
 
     const handleComplete = async (label: string) => {
         if (!selectedClip || !label.trim()) {
-            alert('Please enter a display label.');
+            toast.error('Please enter a display label.');
             return;
         }
         setIsCompleting(true);
@@ -195,7 +196,7 @@ export default function EditorHubPage() {
             });
         } catch (error: any) {
             console.error('Failed to complete clip:', error.message);
-            alert('Failed to complete clip: ' + error.message);
+            toast.error('Failed to complete clip: ' + error.message);
         } finally {
             setIsCompleting(false);
         }
@@ -255,7 +256,7 @@ export default function EditorHubPage() {
             setSearchQuery('');
         } catch (error: any) {
             console.error('Failed to send to rundown:', error.message);
-            alert('Failed to send to rundown: ' + error.message);
+            toast.error('Failed to send to rundown: ' + error.message);
         } finally {
             setIsSendingToRundown(false);
         }

@@ -18,6 +18,7 @@ import { useClips, useSendToEditorHub } from '@/hooks/useClips';
 import type { Story, StoryClip } from '@/types/types';
 import VideoPreview from '@/components/VideoPreview';
 import { formatDuration } from '@/utils/metadata';
+import { toast } from 'sonner';
 
 const EMPTY_ARRAY: any[] = [];
 
@@ -137,7 +138,7 @@ export default function OutputPage() {
       }
     } catch (error: any) {
       console.error('Failed to send to editor hub:', error.message);
-      alert('Failed to send to editor hub: ' + error.message);
+      toast.error('Failed to send to editor hub: ' + error.message);
     } finally {
       setSendingClipId(null);
     }
@@ -150,9 +151,9 @@ export default function OutputPage() {
         storyId: selectedStory.storyId,
         data: { editorialNotes: localStoryNotes },
       });
-      alert('Notes saved!');
+      toast.success('Notes saved!');
     } catch (error: any) {
-      alert('Failed to save notes: ' + error.message);
+      toast.error('Failed to save notes: ' + error.message);
     }
   };
 
