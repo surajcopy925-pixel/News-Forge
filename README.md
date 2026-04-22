@@ -20,7 +20,7 @@ npm install
 Create a `.env` file based on your environment. Ensure you have the following keys:
 ```env
 DATABASE_URL="postgresql://user:pass@localhost:5432/newsforge"
-NEXTAUTH_URL="http://localhost:3000"
+NEXTAUTH_URL="http://192.168.1.126:3000"
 NEXTAUTH_SECRET="generate-a-secure-secret-here"
 ```
 
@@ -50,7 +50,7 @@ If using a teleprompter like WinPlus/Autocue:
 ```bash
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) to view the application. You will be redirected to the login page.
+Open [http://192.168.1.126:3000](http://192.168.1.126:3000) to view the application. You will be redirected to the login page.
 
 ## 🏗️ Core Pages
 - **Login**: Secure access via NextAuth.

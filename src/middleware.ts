@@ -17,6 +17,6 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      */
-    '/((?!login|api/auth|api/events|_next/static|_next/image|favicon.ico).*)',
+    '/((?!login|newsroom-connect\\.html|api/auth|api/events|api/prompter|api/upload|api/files|api/debug-schema|api/debug-clips|_next/static|_next/image|favicon.ico).*)',
   ],
 };

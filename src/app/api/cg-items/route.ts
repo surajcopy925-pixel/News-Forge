@@ -57,6 +57,22 @@ export async function POST(req: NextRequest) {
     if (!storyId) return errorResponse('storyId is required');
     if (!templateName) return errorResponse('templateName is required');
 
+    if (storyId.startsWith('SYS-')) {
+      const existingStory = await prisma.story.findUnique({ where: { storyId } });
+      if (!existingStory) {
+        await prisma.story.create({
+          data: {
+            storyId,
+            title: storyId.replace('SYS-', ''),
+            slug: storyId.replace('SYS-', ''),
+            format: 'EMPTY',
+            status: 'READY',
+            createdBy: userId,
+          }
+        });
+      }
+    }
+
     // Get next orderIndex
     const lastItem = await prisma.cgItem.findFirst({
       where: { storyId },
@@ -64,11 +80,13 @@ export async function POST(req: NextRequest) {
     });
     const nextIndex = (lastItem?.orderIndex ?? -1) + 1;
 
+    const finalEntryId = (entryId && !entryId.startsWith('SYS-')) ? entryId : null;
+
     const cgItem = await prisma.cgItem.create({
       data: {
         cgItemId: generateCgItemId(),
         storyId,
-        entryId: entryId || null,
+        entryId: finalEntryId,
         templateName,
         concept: concept || 'Default',
         variant: variant || 'Default',

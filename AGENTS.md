@@ -226,10 +226,10 @@
 
 After all tasks complete, verify:
 
-1. Visit http://localhost:3000 → should redirect to /login
+1. Visit http://192.168.1.126:3000 → should redirect to /login
 2. Login with priya.sharma@newsforge.com / newsforge123 → should redirect to /rundown
 3. All 4 pages load without errors
 4. UserMenu shows "Priya Sharma PRODUCER" with logout button
 5. Open two browser tabs — create a story in tab 1 → tab 2 should auto-update
-6. curl http://localhost:3000/api/auth/me → returns user object (with valid session)
+6. curl http://192.168.1.126:3000/api/auth/me → returns user object (with valid session)
 7. Check browser DevTools Network tab → SSE connection to /api/events active
