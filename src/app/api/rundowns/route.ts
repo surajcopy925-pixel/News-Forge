@@ -43,11 +43,14 @@ export async function POST(req: NextRequest) {
     if (!date) return errorResponse('date is required');
     if (!broadcastTime) return errorResponse('broadcastTime is required');
 
-    // Check if rundown already exists for this date + broadcastTime
+    // Check if rundown already exists by rundownId or date + broadcastTime
+    const finalRundownId = body.rundownId || generateRundownId();
     const existing = await prisma.rundown.findFirst({
       where: {
-        date,
-        broadcastTime,
+        OR: [
+          { rundownId: finalRundownId },
+          { date, broadcastTime }
+        ]
       },
     });
 
@@ -57,11 +60,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Create new rundown
-    const rundownId = generateRundownId();
-
     const rundown = await prisma.rundown.create({
       data: {
-        rundownId,
+        rundownId: finalRundownId,
         title,
         date,
         broadcastTime,
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
     await createAuditLog({
       action: 'CREATE',
       entity: 'RUNDOWN',
-      entityId: rundownId,
+      entityId: rundown.rundownId,
       newValue: { title, date, broadcastTime },
     });
 

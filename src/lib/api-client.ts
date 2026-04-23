@@ -172,6 +172,11 @@ export const rundownsApi = {
     apiFetch<any>(`/rundowns/${rundownId}/entries/${entryId}`, {
       method: 'DELETE',
     }),
+
+  seed: (rundownId: string) =>
+    apiFetch<any>(`/rundowns/${rundownId}/seed`, {
+      method: 'POST',
+    }),
 };
 
 // ═══════════════════════════════════════

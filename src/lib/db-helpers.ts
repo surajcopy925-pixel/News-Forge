@@ -105,6 +105,7 @@ export function toFrontendStory(s: PrismaStory) {
     source: s.source ?? undefined,
     language: (s.language ?? 'en') as 'en' | 'kn',
     priority: (s.priority ?? 'NORMAL') as 'URGENT' | 'NORMAL' | 'LOW',
+    clips: (s as any).clips ? (s as any).clips.map(toFrontendClip) : [],
   };
 }
 
@@ -140,7 +141,7 @@ export function toFrontendRundown(r: PrismaRundown) {
   };
 }
 
-export function toFrontendEntry(e: PrismaEntry) {
+export function toFrontendEntry(e: PrismaEntry & { story?: any }) {
   return {
     entryId: e.entryId,
     rundownId: e.rundownId,
@@ -148,6 +149,7 @@ export function toFrontendEntry(e: PrismaEntry) {
     orderIndex: e.orderIndex,
     scriptContent: e.scriptContent,
     scriptSource: e.scriptSource as 'POLISHED' | 'RAW' | null,
+    story: e.story ? toFrontendStory(e.story) : undefined,
   };
 }
 

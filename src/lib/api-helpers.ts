@@ -81,11 +81,13 @@ export function generateRundownId(): string {
 }
 
 export function generateEntryId(): string {
-  return `ENT-${Date.now().toString(36).toUpperCase()}`;
+  const random = Math.random().toString(36).substring(2, 5).toUpperCase();
+  return `ENT-${Date.now().toString(36).toUpperCase()}-${random}`;
 }
 
 export function generateCgItemId() {
-  return `CG-${Date.now().toString(36).toUpperCase()}`;
+  const random = Math.random().toString(36).substring(2, 5).toUpperCase();
+  return `CG-${Date.now().toString(36).toUpperCase()}-${random}`;
 }
 
 export function generateSlug(title: string): string {

@@ -25,8 +25,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     await Promise.all(
       entryIds.map((entryId: string, index: number) =>
-        prisma.rundownEntry.update({
-          where: { entryId },
+        prisma.rundownEntry.updateMany({
+          where: { entryId, rundownId }, // Extra safety with rundownId
           data: { orderIndex: index },
         })
       )

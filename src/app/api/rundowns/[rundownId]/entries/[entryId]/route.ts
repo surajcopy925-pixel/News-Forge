@@ -35,11 +35,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (!existing) return notFoundResponse('Entry', entryId);
 
     const data: any = {};
+    if (body.storyId !== undefined) data.storyId = body.storyId;
     if (body.scriptContent !== undefined) data.scriptContent = body.scriptContent;
     if (body.scriptSource !== undefined) data.scriptSource = body.scriptSource;
     if (body.orderIndex !== undefined) data.orderIndex = body.orderIndex;
 
-    const entry = await prisma.rundownEntry.update({ where: { entryId }, data });
+    const entry = await prisma.rundownEntry.update({
+      where: { entryId },
+      data,
+      include: { story: true }, // Include story to return full updated object
+    });
 
     await createAuditLog({
       action: 'UPDATE',

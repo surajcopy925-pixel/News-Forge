@@ -96,3 +96,13 @@ export function useDeleteEntry() {
     },
   });
 }
+
+export function useSeedRundown() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (rundownId: string) => rundownsApi.seed(rundownId),
+    onSuccess: (_, rundownId) => {
+      queryClient.invalidateQueries({ queryKey: ['rundown-entries', rundownId] });
+    },
+  });
+}

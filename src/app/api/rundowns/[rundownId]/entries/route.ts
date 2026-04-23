@@ -24,9 +24,17 @@ export async function GET(req: NextRequest, { params }: Params) {
 
     const entries = await prisma.rundownEntry.findMany({
       where: { rundownId },
+      include: {
+        story: {
+          include: {
+            clips: true,
+          },
+        },
+      },
       orderBy: { orderIndex: 'asc' },
     });
 
+    console.log(`[API] Fetched ${entries.length} entries for rundown ${rundownId}`);
     return successResponse(entries.map(toFrontendEntry));
   } catch (e: any) {
     console.error('GET /api/rundowns/[id]/entries error:', e);

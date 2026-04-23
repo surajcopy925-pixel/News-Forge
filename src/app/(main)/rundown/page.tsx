@@ -3,10 +3,11 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useStories, useCreateStory, useUpdateStory } from '@/hooks/useStories';
 import { useAuth } from '@/hooks/useAuth';
-import { useClips } from '@/hooks/useClips';
-import { useRundowns, useRundownEntries, useCreateRundown, useDeleteEntry, useReorderEntries, useAddEntryToRundown } from '@/hooks/useRundowns';
+import { useClips, useDeleteClip } from '@/hooks/useClips';
+import { useRundowns, useRundownEntries, useCreateRundown, useDeleteEntry, useReorderEntries, useAddEntryToRundown, useSeedRundown } from '@/hooks/useRundowns';
 import { useSendToRundown } from '@/hooks/useStories';
 import { useUsers } from '@/hooks/useUsers';
 import { useCGItems, useCreateCGItem, useUpdateCGItem, useDeleteCGItem, useReorderCGItems } from '@/hooks/useCGItems';
@@ -15,26 +16,15 @@ import { useMosStatus, useMosConnect, useMosDisconnect, useSendRundownToViz } fr
 import { usePrompterStatus, usePrompterConnect, usePrompterDisconnect, useSendToPrompter } from '@/hooks/usePrompter';
 import TemplateBrowser from '@/components/TemplateBrowser';
 import { toast } from 'sonner';
-import { Layers, Plus, ExternalLink, Trash2, GripVertical, CheckCircle, Clock, AlertCircle, ScrollText } from 'lucide-react';
+import { Layers, Plus, ExternalLink, Trash2, GripVertical, CheckCircle, Clock, AlertCircle, ScrollText, Play, Film, X, Link as LinkIcon } from 'lucide-react';
 import { generateAllTimeSlots, parseToSeconds, formatSeconds } from '@/utils/metadata';
+import { rundownsApi } from '@/lib/api-client';
 import type { Story, StoryClip, RundownEntry } from '@/types/types';
 
 const EMPTY_ARRAY: any[] = [];
 
 /* ── types ── */
 
-interface SystemRow {
-  entryId: string;
-  rundownId: string;
-  storyId: string;
-  orderIndex: number;
-  scriptContent: string | null;
-  scriptSource: 'POLISHED' | 'RAW' | null;
-  isSystem: true;
-  slug: string;
-  format: string;
-  plannedDuration: string;
-}
 
 interface MergedEntry {
   entryId: string;
@@ -52,15 +42,6 @@ interface MergedEntry {
 }
 
 /* ── constants ── */
-function buildSystemRows(rundownId: string): SystemRow[] {
-  return [
-    { entryId: `SYS-${rundownId}-HEADLINES`, rundownId, storyId: 'SYS-HEADLINES', orderIndex: 0, scriptContent: null, scriptSource: null, isSystem: true, slug: 'HEADLINES', format: 'ANCHOR', plannedDuration: '00:00:15' },
-    { entryId: `SYS-${rundownId}-START`, rundownId, storyId: 'SYS-START', orderIndex: 1, scriptContent: null, scriptSource: null, isSystem: true, slug: 'START', format: 'ANCHOR', plannedDuration: '00:00:15' },
-    { entryId: `SYS-${rundownId}-BREAK1`, rundownId, storyId: 'SYS-BREAK1', orderIndex: 100, scriptContent: null, scriptSource: null, isSystem: true, slug: 'BREAK 1', format: 'BREAK', plannedDuration: '00:05:00' },
-    { entryId: `SYS-${rundownId}-BREAK2`, rundownId, storyId: 'SYS-BREAK2', orderIndex: 200, scriptContent: null, scriptSource: null, isSystem: true, slug: 'BREAK 2', format: 'BREAK', plannedDuration: '00:05:00' },
-    { entryId: `SYS-${rundownId}-END`, rundownId, storyId: 'SYS-END', orderIndex: 999, scriptContent: null, scriptSource: null, isSystem: true, slug: 'END', format: 'ANCHOR', plannedDuration: '00:00:15' },
-  ];
-}
 
 function fmtBadge(f: string) {
   switch (f) {
@@ -115,6 +96,7 @@ export default function RundownPage() {
   const [showNewMenu, setShowNewMenu] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [linkingEntryId, setLinkingEntryId] = useState<string | null>(null);
   const [addSearch, setAddSearch] = useState('');
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
   const [editingCgItemId, setEditingCgItemId] = useState<string | null>(null);
@@ -137,9 +119,37 @@ export default function RundownPage() {
   const [eVO, setEVO] = useState('');
   const [eNotes, setENotes] = useState('');
 
-  /* ── drag ── */
+  /* ── auto-resize textarea fix ── */
+  const resizeTextarea = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  };
+
+  const anchorRef = useRef<HTMLTextAreaElement>(null);
+  const voRef = useRef<HTMLTextAreaElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    resizeTextarea(anchorRef.current);
+  }, [eAnchor]);
+
+  useEffect(() => {
+    resizeTextarea(voRef.current);
+  }, [eVO]);
+
+  useEffect(() => {
+    resizeTextarea(notesRef.current);
+  }, [eNotes]);
+
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  /* ── UI enhancements ── */
+  const [isSplitView, setIsSplitView] = useState(false);
+  const [isSavingScript, setIsSavingScript] = useState(false);
+  const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
+  const [tempTitle, setTempTitle] = useState('');
 
   /* ── refs ── */
   const splitRef = useRef(false);
@@ -167,6 +177,10 @@ export default function RundownPage() {
   const deleteEntryMutation = useDeleteEntry();
   const reorderEntriesMutation = useReorderEntries();
   const addEntryMutation = useAddEntryToRundown();
+  const seedRundownMutation = useSeedRundown();
+  const deleteClipMutation = useDeleteClip();
+  const queryClient = useQueryClient();
+  const clipInputRef = useRef<HTMLInputElement>(null);
 
   /* ═══════ 1. ALL RUNDOWNS (merge auto + DB) ═══════ */
   const allRundowns = useMemo(() => {
@@ -196,29 +210,31 @@ export default function RundownPage() {
     return selectedRundownId ? allRundowns.find((r) => r.rundownId === selectedRundownId) || null : null;
   }, [allRundowns, selectedRundownId]);
 
-  /* ═══════ 4. ENTRIES — CHANGE 3: all rows movable ═══════ */
+  /* ═══════ 4. ENTRIES — Treated uniformly (all from DB) ═══════ */
   const entriesForRundown: MergedEntry[] = useMemo(() => {
     if (!selectedRundownId) return [];
-    const sys = buildSystemRows(selectedRundownId);
 
-    const storyE: MergedEntry[] = dbEntries.map((entry: any) => {
-      const story = stories.find((s) => s.storyId === entry.storyId);
+    console.log("[DEBUG] dbEntries from API:", dbEntries);
+
+    const mapped = dbEntries.map((entry: any) => {
+      const story = entry.story; // Use nested story from API directly
       const clips = allClips.filter((c) => c.storyId === entry.storyId);
+      const isSystem = entry.storyId?.startsWith('SYS-') ?? true;
+      
       return {
         ...entry,
-        isSystem: false,
-        slug: story?.slug || story?.title || 'Untitled',
-        format: story?.format || '',
-        plannedDuration: story?.plannedDuration || '00:00:00',
+        isSystem,
+        slug: story?.slug || story?.title || entry.slug || 'Untitled',
+        format: story?.format || entry.format || '',
+        plannedDuration: story?.plannedDuration || entry.plannedDuration || '00:00:00',
         story,
         clips,
       };
     });
-
-    // All entries in one flat list — system + stories interleaved
-    const all: MergedEntry[] = [sys[0], sys[1], ...storyE, sys[2], sys[3], sys[4]];
-    return all.map((e, i) => ({ ...e, orderIndex: i }));
-  }, [selectedRundownId, dbEntries, stories, allClips]);
+    
+    console.log("[DEBUG] mapped entriesForRundown:", mapped);
+    return mapped;
+  }, [selectedRundownId, dbEntries, allClips]);
 
   /* ═══════ 5. TIMING ═══════ */
   const storySec = useMemo(() => entriesForRundown.filter((e) => e.format !== 'BREAK').reduce((s, e) => s + parseToSeconds(e.plannedDuration), 0), [entriesForRundown]);
@@ -362,6 +378,7 @@ export default function RundownPage() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }, [pathname, router, selectedRundownId]);
 
+
   /* ═══════ 8. LOAD DETAIL DATA ═══════ */
   useEffect(() => {
     if (selectedEntry && !selectedEntry.isSystem && selectedEntry.story) {
@@ -374,21 +391,85 @@ export default function RundownPage() {
     }
   }, [selectedEntry]);
 
-  /* ═══════ ENSURE RUNDOWN EXISTS ═══════ */
+  /* ═══════ ENSURE RUNDOWN EXISTS & SEED SYSTEM ROWS ═══════ */
   const ensureRundownExists = useCallback(async (rundownId: string): Promise<string> => {
     const existing = dbRundowns.find((r: any) => r.rundownId === rundownId);
     if (existing) return existing.rundownId;
+    
     const slot = allRundowns.find((r) => r.rundownId === rundownId);
-    if (!slot) throw new Error('Rundown slot not found');
-    const created = await createRundownMutation.mutateAsync({
-      title: slot.title,
-      date: selectedDate,
-      broadcastTime: slot.broadcastTime,
-      plannedDuration: slot.plannedDuration,
-    });
-    setSelectedRundownId(created.rundownId);
-    return created.rundownId;
-  }, [dbRundowns, allRundowns, selectedDate, createRundownMutation]);
+    if (!slot) {
+      console.warn("Rundown slot missing, skipping creation");
+      return rundownId;
+    }
+    
+    // Determine defaults if slot not in UI list
+    const title = slot?.title || 'New Rundown';
+    const broadcastTime = slot?.broadcastTime || '00:00';
+    const plannedDuration = slot?.plannedDuration || '00:30:00';
+
+    console.log('[DEBUG] Creating new rundown in DB with ID:', rundownId);
+    try {
+      const created = await createRundownMutation.mutateAsync({
+        rundownId: rundownId, // Pass the frontend-generated ID to sync
+        title,
+        date: selectedDate,
+        broadcastTime,
+        plannedDuration,
+      });
+
+      // Seed via API instead of manual loop
+      console.log('[DEBUG] Triggering seed for new rundown:', created.rundownId);
+      await seedRundownMutation.mutateAsync(created.rundownId);
+
+      setSelectedRundownId(created.rundownId);
+      return created.rundownId;
+    } catch (err: any) {
+      console.error('[ERROR] Failed to ensure rundown exists:', err);
+      // If it failed because it exists, just return the ID
+      if (err.message?.includes('Unique constraint')) {
+        return rundownId;
+      }
+      throw err;
+    }
+  }, [dbRundowns, allRundowns, selectedDate, createRundownMutation, seedRundownMutation]);
+
+  /* ═══════ AUTO-ENSURE & SEED SELECTED RUNDOWN ═══════ */
+  const isEnsuringRef = useRef(false);
+
+  useEffect(() => {
+    if (!selectedRundownId || isEnsuringRef.current) return;
+
+    const runAutoFlow = async () => {
+      const exists = dbRundowns.some((r: any) => r.rundownId === selectedRundownId);
+      
+      if (!exists) {
+        console.log('[DEBUG] Selected rundown missing from DB, ensuring exists:', selectedRundownId);
+        isEnsuringRef.current = true;
+        try {
+          await ensureRundownExists(selectedRundownId);
+        } catch (e) {
+          console.error("Auto-ensure failed:", e);
+        } finally {
+          isEnsuringRef.current = false;
+        }
+      } else if (dbRundownId && !entriesLoading && entriesForRundown.length === 0 && !seedRundownMutation.isPending) {
+        console.log("[FIX] Seeding rundown:", dbRundownId);
+        seedRundownMutation.mutate(dbRundownId);
+      }
+    };
+
+    runAutoFlow();
+  }, [selectedRundownId, dbRundownId, entriesLoading, entriesForRundown.length, dbRundowns.length, ensureRundownExists, seedRundownMutation]);
+
+  /* ═══════ MUTATIONS ═══════ */
+  const updateEntryMutation = useMutation({
+    mutationFn: ({ entryId, data }: { entryId: string, data: any }) => 
+      rundownsApi.updateEntry(selectedRundownId!, entryId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rundown-entries', selectedRundownId] });
+      queryClient.invalidateQueries({ queryKey: ['stories'] });
+    }
+  });
 
   /* ═══════ HANDLERS ═══════ */
   const chgDate = (d: number) => {
@@ -399,20 +480,74 @@ export default function RundownPage() {
 
   const selectRd = (id: string) => { setSelectedRundownId(id); setSelectedEntryId(null); setDetailOpen(false); };
 
-  const clickRow = (e: MergedEntry) => { setSelectedEntryId(e.entryId); setDetailOpen(true); setDetailTab('SCRIPT'); };
+  const clickRow = (e: MergedEntry) => { 
+    if (editingTitleId) return; // Don't open detail if editing title
+    setSelectedEntryId(e.entryId); 
+    setDetailOpen(true); 
+    setDetailTab('SCRIPT'); 
+  };
 
-  const saveChanges = async () => {
-    if (!selectedEntry || selectedEntry.isSystem || !selectedEntry.story) return;
-    const sid = selectedEntry.story.storyId;
+  const handleTitleClick = (e: React.MouseEvent, entry: MergedEntry) => {
+    if (entry.isSystem) return;
+    e.stopPropagation();
+    setEditingTitleId(entry.storyId);
+    setTempTitle(entry.story?.title || entry.slug);
+  };
+
+  const saveTitle = async () => {
+    if (!editingTitleId) return;
+    const newTitle = tempTitle.trim();
+    const sid = editingTitleId;
+    setEditingTitleId(null);
+
+    if (!newTitle) return;
+
     try {
       await updateStoryMutation.mutateAsync({
         storyId: sid,
-        data: { anchorScript: eAnchor, voiceoverScript: eVO, editorialNotes: eNotes },
+        data: { title: newTitle },
       });
-      toast.success('Story updated successfully');
+      toast.success('Title updated');
+    } catch (error: any) {
+      toast.error('Failed to update title');
+    }
+  };
+
+
+
+  const saveChanges = async () => {
+    if (!selectedEntry) return;
+    setIsSavingScript(true);
+    try {
+      // 1. Update Story (if linked and not system)
+      if (!selectedEntry.isSystem && selectedEntry.storyId) {
+        await updateStoryMutation.mutateAsync({
+          storyId: selectedEntry.storyId,
+          data: { 
+            anchorScript: eAnchor, 
+            voiceoverScript: eVO, 
+            editorialNotes: eNotes,
+            rawScript: eAnchor // Sync rawScript too
+          },
+        });
+      }
+
+      // 2. Update Rundown Entry (Always save to entry too)
+      await updateEntryMutation.mutateAsync({
+        entryId: selectedEntry.entryId,
+        data: { 
+          scriptContent: eAnchor, // Main script content for entry
+          scriptSource: 'POLISHED' 
+        }
+      });
+
+      toast.success('Script saved successfully');
+      queryClient.invalidateQueries({ queryKey: ['rundown-entries', selectedRundownId] });
     } catch (error: any) {
       console.error('Save failed:', error);
       toast.error('Save failed: ' + (error.message || 'Unknown error'));
+    } finally {
+      setIsSavingScript(false);
     }
   };
 
@@ -437,6 +572,42 @@ export default function RundownPage() {
     if (n >= 0 && n < entriesForRundown.length) setSelectedEntryId(entriesForRundown[n].entryId);
   };
 
+  /* ── clip management ── */
+  const [isUploadingClip, setIsUploadingClip] = useState(false);
+  const handleClipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedEntry?.storyId) return;
+
+    setIsUploadingClip(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('storyId', selectedEntry.storyId);
+
+    try {
+      const res = await fetch('/api/clips/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error('Upload failed');
+      
+      toast.success('Clip attached successfully');
+      queryClient.invalidateQueries({ queryKey: ['rundown-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['clips'] });
+      if (e.target) e.target.value = '';
+    } catch (err) {
+      toast.error('Failed to upload clip');
+    } finally {
+      setIsUploadingClip(false);
+    }
+  };
+
+  const openLibrary = () => toast.info('Clip Library coming soon');
+  const [previewClip, setPreviewClip] = useState<StoryClip | null>(null);
+  const playClip = (clip: StoryClip) => {
+    setPreviewClip(previewClip?.clipId === clip.clipId ? null : clip);
+  };
+
   /* ── CHANGE 3: drag — ALL rows movable (system + story) ── */
   const onDragStart = (i: number) => setDragIdx(i);
   const onDragOver = (e: React.DragEvent, i: number) => { e.preventDefault(); setDragOverIdx(i); };
@@ -446,12 +617,13 @@ export default function RundownPage() {
       const [moved] = reordered.splice(dragIdx, 1);
       reordered.splice(dragOverIdx, 0, moved);
 
-      // Extract non-system entry IDs for API reorder
-      const nonSystemIds = reordered.filter((e) => !e.isSystem).map((e) => e.entryId);
+      // All entries are now real DB entries (system or story)
+      const entryIds = reordered.map((e) => e.entryId);
       const realId = dbRundowns.find((r: any) => r.rundownId === selectedRundownId)?.rundownId;
-      if (realId && nonSystemIds.length > 0) {
+      
+      if (realId && entryIds.length > 0) {
         try {
-          await reorderEntriesMutation.mutateAsync({ rundownId: realId, entryIds: nonSystemIds });
+          await reorderEntriesMutation.mutateAsync({ rundownId: realId, entryIds });
           toast.success('Rundown reordered');
         } catch (error: any) {
           console.error('Reorder failed:', error);
@@ -525,12 +697,24 @@ export default function RundownPage() {
     if (!selectedRundownId) return;
     try {
       const realRundownId = await ensureRundownExists(selectedRundownId);
-      await sendToRundownMutation.mutateAsync({
-        storyId: sid,
-        data: { rundownId: realRundownId },
-      });
+      
+      if (linkingEntryId) {
+        // LINKING to existing entry
+        await updateEntryMutation.mutateAsync({
+          entryId: linkingEntryId,
+          data: { storyId: sid }
+        });
+        setLinkingEntryId(null);
+      } else {
+        // ADDING as new entry
+        await sendToRundownMutation.mutateAsync({
+          storyId: sid,
+          data: { rundownId: realRundownId },
+        });
+      }
+      
       setShowAddModal(false); setAddSearch('');
-      toast.success('Story added to rundown');
+      toast.success(linkingEntryId ? 'Story linked to entry' : 'Story added to rundown');
     } catch (error: any) {
       console.error('Add failed:', error);
       toast.error('Failed to add story: ' + (error.message || 'Unknown error'));
@@ -593,10 +777,10 @@ export default function RundownPage() {
   /* ═══════ LOADING ═══════ */
   if (storiesLoading || clipsLoading || rundownsLoading) {
     return (
-      <div className="flex h-[calc(100vh-56px)] bg-[#0a0e17] items-center justify-center">
+      <div className="flex h-[calc(100vh-56px)] bg-white items-center justify-center">
         <div className="flex flex-col items-center gap-2">
           <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-gray-400 text-xs">Loading rundowns...</p>
+          <p className="text-gray-500 text-xs">Loading rundowns...</p>
         </div>
       </div>
     );
@@ -604,25 +788,25 @@ export default function RundownPage() {
 
   /* ═══════════════════════════ RENDER ═══════════════════════════ */
   return (
-    <div className="flex h-[calc(100vh-56px)] bg-[#0a0e17] text-gray-200 text-xs">
+    <div className={`flex h-[calc(100vh-56px)] bg-white text-gray-900 text-xs ${isSplitView ? 'pl-0' : ''}`}>
 
       {/* ══════ SIDEBAR — CHANGE 1: resizable + CHANGE 4: collapsible ══════ */}
-      {!sidebarCollapsed && (
-        <div style={{ width: sidebarWidth, minWidth: sidebarWidth }} className="border-r border-gray-800/60 flex flex-col bg-[#0d1117]">
-          <div className="px-2 pt-2 pb-1.5 border-b border-gray-800/60">
-            <div className="text-[10px] font-bold text-gray-500 tracking-wider mb-1">RUNDOWNS</div>
+      {!sidebarCollapsed && !isSplitView && (
+        <div style={{ width: sidebarWidth, minWidth: sidebarWidth }} className="border-r border-gray-200 flex flex-col bg-gray-50">
+          <div className="px-2 pt-2 pb-1.5 border-b border-gray-200">
+            <div className="text-[10px] font-bold text-gray-400 tracking-wider mb-1">RUNDOWNS</div>
             <div className="flex items-center justify-between mb-1.5">
-              <button onClick={() => chgDate(-1)} className="text-gray-500 hover:text-white text-sm px-0.5">&lt;</button>
+              <button onClick={() => chgDate(-1)} className="text-gray-400 hover:text-gray-900 text-sm px-0.5">&lt;</button>
               <span className="text-[11px] font-bold tracking-wide">
                 {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase()}
               </span>
-              <button onClick={() => chgDate(1)} className="text-gray-500 hover:text-white text-sm px-0.5">&gt;</button>
+              <button onClick={() => chgDate(1)} className="text-gray-400 hover:text-gray-900 text-sm px-0.5">&gt;</button>
             </div>
-            <button onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])} className="w-full bg-green-600 hover:bg-green-700 text-[10px] font-bold py-0.5 rounded mb-1.5">TODAY</button>
+            <button onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])} className="w-full bg-green-600 hover:bg-green-700 text-[10px] font-bold py-0.5 rounded mb-1.5 text-white">TODAY</button>
             <input
               type="text" placeholder="Search bulletins..." value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-gray-800/60 border border-gray-700/50 rounded px-1.5 py-[3px] text-[10px] text-gray-400 placeholder-gray-600"
+              className="w-full bg-white border border-gray-200 rounded px-1.5 py-[3px] text-[10px] text-gray-900 placeholder-gray-400"
             />
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -633,20 +817,20 @@ export default function RundownPage() {
                 <div
                   key={rd.rundownId} 
                   onClick={() => selectRd(rd.rundownId)}
-                  className={`px-2 py-1.5 cursor-pointer border-b border-gray-800/40 transition-colors ${sel ? 'bg-blue-900/30 border-l-[3px] border-l-blue-500' : 'hover:bg-gray-800/30 border-l-[3px] border-l-transparent'}`}
+                  className={`px-2 py-1.5 cursor-pointer border-b border-gray-100 transition-colors ${sel ? 'bg-blue-50 border-l-[3px] border-l-blue-500' : 'hover:bg-gray-100 border-l-[3px] border-l-transparent'}`}
                 >
-                  <div className="font-semibold text-[11px] truncate leading-tight">{rd.title}</div>
+                  <div className="font-semibold text-[11px] truncate leading-tight text-gray-900">{rd.title}</div>
                   <div className="flex items-center gap-1.5 text-[9px] text-gray-500 mt-0.5">
-                    <span className="text-blue-400 font-bold">RD</span>
+                    <span className="text-blue-600 font-bold">RD</span>
                     <span>{rd.broadcastTime.slice(0, 5)}</span>
-                    <span className="text-gray-700">●</span>
+                    <span className="text-gray-300">●</span>
                     <span>{rd.plannedDuration}</span>
                   </div>
                   <div className="flex items-center justify-between mt-0.5 text-[9px]">
                     <span className="text-gray-500">{5 + sc} STORIES</span>
-                    <span className="text-gray-600">MOS OK</span>
+                    <span className="text-gray-400">MOS OK</span>
                   </div>
-                  <span className={`text-[9px] ${rd.status === 'READY' ? 'text-green-400' : rd.status === 'LIVE' ? 'text-red-400' : 'text-yellow-500'}`}>● {rd.status}</span>
+                  <span className={`text-[9px] ${rd.status === 'READY' ? 'text-green-600' : rd.status === 'LIVE' ? 'text-red-600' : 'text-yellow-600'}`}>● {rd.status}</span>
                 </div>
               );
             })}
@@ -655,21 +839,21 @@ export default function RundownPage() {
       )}
 
       {/* ── CHANGE 1: Sidebar resize handle ── */}
-      {!sidebarCollapsed && (
+      {!sidebarCollapsed && !isSplitView && (
         <div
           onMouseDown={() => { sidebarRef.current = true; }}
-          className="w-1 cursor-col-resize hover:bg-blue-600 bg-gray-800/60 flex-shrink-0"
+          className="w-1 cursor-col-resize hover:bg-blue-600 bg-gray-200 flex-shrink-0"
         />
       )}
 
       {/* ══════ MAIN ══════ */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className={`flex-1 flex flex-col min-w-0 ${isSplitView ? 'w-full' : ''}`}>
         {/* action bar */}
-        <div className="flex items-center gap-1 px-3 py-1 border-b border-gray-800/60 bg-[#0d1117]">
+        <div className="flex items-center gap-1 px-3 py-1 border-b border-gray-200 bg-gray-50">
           {/* CHANGE 4: sidebar collapse toggle */}
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="text-gray-500 hover:text-white text-sm px-1 mr-1"
+            className="text-gray-400 hover:text-gray-900 text-sm px-1 mr-1"
             title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
           >
             {sidebarCollapsed ? '▶' : '◀'}
@@ -678,14 +862,14 @@ export default function RundownPage() {
           <div className="relative">
             <button onClick={() => setShowNewMenu(!showNewMenu)} className="bg-green-600 hover:bg-green-700 text-white text-[10px] font-bold px-2.5 py-1 rounded">+ NEW</button>
             {showNewMenu && (
-              <div className="absolute top-full left-0 mt-0.5 bg-gray-800 border border-gray-700 rounded shadow-xl z-50 w-40">
-                <button onClick={() => { setShowCreateModal(true); setShowNewMenu(false); }} className="w-full text-left px-2.5 py-1.5 text-[10px] hover:bg-gray-700">Create Empty Story</button>
-                <button onClick={() => { setShowAddModal(true); setShowNewMenu(false); }} className="w-full text-left px-2.5 py-1.5 text-[10px] hover:bg-gray-700">Add Existing Story</button>
+              <div className="absolute top-full left-0 mt-0.5 bg-white border border-gray-200 rounded shadow-xl z-50 w-40">
+                <button onClick={() => { setShowCreateModal(true); setShowNewMenu(false); }} className="w-full text-left px-2.5 py-1.5 text-[10px] hover:bg-gray-50 text-gray-700">Create Empty Story</button>
+                <button onClick={() => { setShowAddModal(true); setShowNewMenu(false); }} className="w-full text-left px-2.5 py-1.5 text-[10px] hover:bg-gray-50 text-gray-700">Add Existing Story</button>
               </div>
             )}
           </div>
           {['✏ EDIT', '⊘ DELETE', '⎘ COPY', '↕ MOVE', '🖨 PRINT', '🔍 SEARCH', '📤 EXPORT'].map((l) => (
-            <button key={l} className="text-gray-500 hover:text-gray-300 text-[10px] px-1.5 py-1">{l}</button>
+            <button key={l} className="text-gray-400 hover:text-gray-900 text-[10px] px-1.5 py-1 font-semibold">{l}</button>
           ))}
           
           {/* MOS connection status */}
@@ -721,7 +905,7 @@ export default function RundownPage() {
             </button>
           </div>
 
-          <div className="h-4 w-[1px] bg-gray-800 mx-1" />
+          <div className="h-4 w-[1px] bg-gray-200 mx-1" />
 
           {/* Prompter Status */}
           <div className="flex items-center gap-2 text-[10px]">
@@ -796,25 +980,25 @@ export default function RundownPage() {
 
         {/* ── CHANGE 4: Rundown info bar with dropdown ── */}
         {selectedRundown && (
-          <div className="flex items-center gap-5 px-3 py-1.5 border-b border-gray-800/60 text-[10px]">
+          <div className="flex items-center gap-5 px-3 py-1.5 border-b border-gray-200 text-[10px] bg-white">
             <div className="relative">
-              <span className="text-gray-500 block text-[9px]">RUNDOWN</span>
+              <span className="text-gray-400 block text-[9px]">RUNDOWN</span>
               <select
                 value={selectedRundownId || ''}
                 onChange={(e) => selectRd(e.target.value)}
-                className="bg-transparent text-white font-bold text-[11px] border border-gray-700/50 rounded px-2 py-0.5 appearance-none cursor-pointer pr-6 max-w-[200px]"
+                className="bg-transparent text-gray-900 font-bold text-[11px] border border-gray-200 rounded px-2 py-0.5 appearance-none cursor-pointer pr-6 max-w-[200px]"
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
               >
                 {allRundowns.map((rd) => (
-                  <option key={rd.rundownId} value={rd.rundownId} className="bg-[#0d1117] text-white">
+                  <option key={rd.rundownId} value={rd.rundownId} className="bg-white text-gray-900">
                     {rd.title}
                   </option>
                 ))}
               </select>
             </div>
-            <div><span className="text-gray-500 block text-[9px]">STATUS</span><span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${selectedRundown.status === 'READY' ? 'bg-green-600' : selectedRundown.status === 'LIVE' ? 'bg-red-600' : 'bg-yellow-600'}`}>{selectedRundown.status}</span></div>
-            <div><span className="text-gray-500 block text-[9px]">DURATION</span><span className="font-mono font-bold text-[11px]">{formatSeconds(totalSec)}</span></div>
-            <div><span className="text-gray-500 block text-[9px]">PLANNED</span><span className="font-mono bg-red-600/20 text-red-400 px-1.5 py-0.5 rounded text-[9px]">{selectedRundown.plannedDuration}</span></div>
+            <div><span className="text-gray-400 block text-[9px]">STATUS</span><span className={`font-bold px-1.5 py-0.5 rounded text-[9px] text-white ${selectedRundown.status === 'READY' ? 'bg-green-600' : selectedRundown.status === 'LIVE' ? 'bg-red-600' : 'bg-yellow-600'}`}>{selectedRundown.status}</span></div>
+            <div><span className="text-gray-400 block text-[9px]">DURATION</span><span className="font-mono font-bold text-[11px] text-gray-900">{formatSeconds(totalSec)}</span></div>
+            <div><span className="text-gray-400 block text-[9px]">PLANNED</span><span className="font-mono bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded text-[9px]">{selectedRundown.plannedDuration}</span></div>
             <div className="flex-1" />
             <div className="text-right">
               <span className="text-gray-500 block text-[9px]">MOS CONNECTION</span>
@@ -830,10 +1014,17 @@ export default function RundownPage() {
           </div>
         )}
 
-        {/* table + detail */}
-        <div id="rd-main" className="flex-1 flex flex-col min-h-0">
-          {/* TABLE */}
-          <div style={{ height: detailOpen ? `${splitPct}%` : '100%' }} className="overflow-auto">
+        {/* table + detail — 🔥 STEP 1 & 5 */}
+        <div id="rd-main" className={`flex-1 flex ${isSplitView ? 'flex-row' : 'flex-col'} h-full min-h-0 overflow-hidden`}>
+          {/* TABLE CONTAINER — 🔥 STEP 2 & 3 */}
+          <div 
+            style={{ 
+              ...(isSplitView 
+                ? { width: detailOpen ? '40%' : '100%', height: '100%' } 
+                : { height: detailOpen ? `${splitPct}%` : '100%', width: '100%' })
+            }} 
+            className="flex-1 min-h-0 overflow-y-auto border-r border-gray-200 bg-white"
+          >
             {entriesLoading && dbRundownId ? (
               <div className="flex items-center justify-center py-8">
                 <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mr-2" />
@@ -842,8 +1033,8 @@ export default function RundownPage() {
             ) : (
               <>
                 <table className="w-full">
-                  <thead className="bg-[#0d1117] sticky top-0 z-10">
-                    <tr className="text-gray-500 text-[9px] tracking-wider border-b border-gray-800/60">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
+                    <tr className="text-gray-400 text-[9px] tracking-wider border-b border-gray-200">
                       <th className="py-1 px-1.5 w-6 text-center">#</th>
                       <th className="py-1 px-0.5 w-4"></th>
                       <th className="py-1 px-0.5 w-4"></th>
@@ -863,6 +1054,8 @@ export default function RundownPage() {
                     {entriesForRundown.map((e, idx) => {
                       const isSel = e.entryId === selectedEntryId;
                       const isDO = dragOverIdx === idx;
+                      const hasClips = (e.clips || []).length > 0;
+                      
                       return (
                         <tr
                           key={e.entryId}
@@ -871,15 +1064,56 @@ export default function RundownPage() {
                           onDragOver={(ev) => onDragOver(ev, idx)}
                           onDragEnd={onDragEnd}
                           onClick={() => clickRow(e)}
-                          className={`border-b border-gray-800/30 cursor-pointer transition-colors ${isSel ? 'bg-blue-900/20' : 'hover:bg-gray-800/20'} ${isDO ? 'border-t-2 border-t-blue-500' : ''}`}
+                          className={`
+                            border-b border-gray-100 cursor-pointer transition-colors 
+                            ${isSel ? 'bg-blue-50' : hasClips ? 'bg-emerald-50 hover:bg-emerald-100' : 'hover:bg-gray-50'} 
+                            ${isDO ? 'border-t-2 border-t-blue-500' : ''}
+                            ${hasClips ? 'border-l-4 border-l-emerald-500' : 'border-l-4 border-l-transparent'}
+                          `}
                         >
-                          <td className="py-[5px] px-1.5 text-center text-gray-600 text-[10px]">{idx}</td>
-                          <td className="py-[5px] px-0.5 text-center text-gray-700 cursor-grab text-[10px]">⠿</td>
+                          <td className="py-[5px] px-1.5 text-center text-gray-400 text-[10px]">{idx}</td>
+                          <td className="py-[5px] px-0.5 text-center text-gray-300 cursor-grab text-[10px]">⠿</td>
                           <td className="py-[5px] px-0.5 text-center">
                             <span className={`inline-block w-2 h-2 rounded-full ${e.isSystem ? 'bg-red-500' : e.story?.status === 'READY' ? 'bg-green-500' : e.story?.status === 'EDITING' ? 'bg-yellow-500' : 'bg-orange-500'}`} />
                           </td>
                           <td className="py-[5px] px-2 font-semibold text-[11px] truncate max-w-[280px]">
-                            {e.isSystem ? e.slug : (e.story?.title || e.slug)}
+                            <div className="flex items-center gap-2 group">
+                              {e.isSystem ? (
+                                <span className="text-gray-400 uppercase tracking-wider">[{e.slug}]</span>
+                              ) : editingTitleId === e.storyId ? (
+                                <input
+                                  autoFocus
+                                  value={tempTitle}
+                                  onChange={(ev) => setTempTitle(ev.target.value)}
+                                  onBlur={saveTitle}
+                                  onKeyDown={(ev) => {
+                                    if (ev.key === 'Enter') saveTitle();
+                                    if (ev.key === 'Escape') setEditingTitleId(null);
+                                  }}
+                                  onClick={(ev) => ev.stopPropagation()}
+                                  className="bg-[#1a2233] border border-blue-500 rounded px-1 w-full text-white outline-none"
+                                />
+                              ) : (
+                                <span onClick={(ev) => handleTitleClick(ev, e)} className="hover:text-blue-400 transition-colors cursor-text">
+                                  {e.story?.title || e.slug}
+                                  {hasClips && <span className="ml-2 text-emerald-600" title="Media Attached">🎬</span>}
+                                </span>
+                              )}
+
+                              {e.isSystem && (
+                                <button
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    setLinkingEntryId(e.entryId);
+                                    setShowAddModal(true);
+                                  }}
+                                  className="p-1 hover:bg-gray-100 rounded text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Link story to this slot"
+                                >
+                                  <LinkIcon size={12} />
+                                </button>
+                              )}
+                            </div>
                           </td>
                           <td className="py-[5px] px-1 text-center">
                             <span className={`text-[9px] font-bold px-1.5 py-[1px] rounded ${fmtBadge(e.format || e.story?.format || '')}`}>
@@ -888,8 +1122,8 @@ export default function RundownPage() {
                           </td>
                           <td className="py-[5px] px-1 text-center text-[10px]">{clipCell(e)}</td>
                           <td className="py-[5px] px-1 text-center text-gray-400 text-[10px]">
-                            {!e.isSystem && stories.find(s => s.storyId === e.storyId)?._count?.cgItems > 0 ? (
-                              <span className="text-blue-400">{stories.find(s => s.storyId === e.storyId)?._count?.cgItems}</span>
+                            {!e.isSystem && e.story?._count?.cgItems && e.story._count.cgItems > 0 ? (
+                              <span className="text-blue-400">{e.story._count.cgItems}</span>
                             ) : '—'}
                           </td>
                           <td className="py-[5px] px-1 text-center font-mono text-[10px]">{e.isSystem ? <span className="text-gray-600">—</span> : durCell(e)}</td>
@@ -915,129 +1149,208 @@ export default function RundownPage() {
                 </table>
 
                 {/* timing footer */}
-                <div className="flex items-center gap-4 px-3 py-1.5 border-t border-gray-800/60 bg-[#0d1117] text-[10px] font-mono">
-                  <span>STORIES: <strong className="text-white">{formatSeconds(storySec)}</strong></span>
-                  <span>BREAKS: <strong className="text-red-400">{formatSeconds(breakSec)}</strong></span>
-                  <span className="text-gray-700">|</span>
-                  <span>TOTAL: <strong className="text-white">{formatSeconds(totalSec)}</strong></span>
+                <div className="flex items-center gap-4 px-3 py-1.5 border-t border-gray-200 bg-gray-50 text-[10px] font-mono">
+                  <span>STORIES: <strong className="text-gray-900">{formatSeconds(storySec)}</strong></span>
+                  <span>BREAKS: <strong className="text-red-600">{formatSeconds(breakSec)}</strong></span>
+                  <span className="text-gray-300">|</span>
+                  <span>TOTAL: <strong className="text-gray-900">{formatSeconds(totalSec)}</strong></span>
                   <div className="flex-1" />
-                  <span>PLANNED: <span className="bg-red-600/20 text-red-400 px-1.5 py-0.5 rounded">{selectedRundown?.plannedDuration || '00:30:00'}</span></span>
-                  <span>OVER/UNDER: <strong className={overUnder > 0 ? 'text-red-400' : 'text-green-400'}>{overUnder > 0 ? '+' : ''}{formatSeconds(overUnder)}</strong> {overUnder <= 0 ? '✅' : '❌'}</span>
+                  <span>PLANNED: <span className="bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded">{selectedRundown?.plannedDuration || '00:30:00'}</span></span>
+                  <span>OVER/UNDER: <strong className={overUnder > 0 ? 'text-red-600' : 'text-green-600'}>{overUnder > 0 ? '+' : ''}{formatSeconds(overUnder)}</strong> {overUnder <= 0 ? '✅' : '❌'}</span>
                 </div>
+
+                {entriesForRundown.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-20 opacity-50">
+                    <AlertCircle size={32} className="mb-2 text-gray-600" />
+                    <p>No entries found for this rundown.</p>
+                    <p className="text-[10px]">Try creating a story or check if the rundown is seeded.</p>
+                  </div>
+                )}
               </>
             )}
           </div>
 
           {/* resize handle */}
-          {detailOpen && (
-            <div onMouseDown={() => { splitRef.current = true; }} className="h-1.5 bg-gray-800/60 hover:bg-blue-600 cursor-row-resize flex items-center justify-center">
-              <div className="w-10 h-[2px] bg-gray-600 rounded" />
+          {detailOpen && !isSplitView && (
+            <div onMouseDown={() => { splitRef.current = true; }} className="h-1.5 bg-gray-200 hover:bg-blue-600 cursor-row-resize flex items-center justify-center">
+              <div className="w-10 h-[2px] bg-gray-400 rounded" />
             </div>
           )}
 
-          {/* ══════ DETAIL PANEL ══════ */}
+          {/* ══════ DETAIL PANEL — 🔥 STEP 4 ══════ */}
           {detailOpen && selectedEntry && (
-            <div style={{ height: `${100 - splitPct}%` }} className="border-t border-gray-700/50 bg-[#0d1117] flex flex-col min-h-0">
+            <div 
+              style={isSplitView ? { width: '60%' } : { height: `${100 - splitPct}%` }} 
+              className={`${isSplitView ? 'border-l w-1/2' : 'border-t'} border-gray-200 bg-gray-50 flex flex-col h-full min-h-0 overflow-hidden`}
+            >
               {/* header */}
-              <div className="flex items-center px-3 py-1 border-b border-gray-800/60">
+              <div className="flex items-center px-3 py-1 border-b border-gray-200 bg-white shrink-0">
                 <div className="flex gap-3">
                   {(['SCRIPT', 'CLIPS', 'CG GRAPHICS'] as const).map((tab) => {
                     const k = tab === 'CG GRAPHICS' ? 'CG' : tab;
                     return (
                       <button key={tab} onClick={() => setDetailTab(k as any)}
-                        className={`text-[10px] font-bold pb-0.5 ${detailTab === k ? 'text-blue-400 border-b border-blue-400' : 'text-gray-500 hover:text-gray-300'}`}>
+                        className={`text-[10px] font-bold pb-0.5 ${detailTab === k ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400 hover:text-gray-900'}`}>
                         {tab}
                       </button>
                     );
                   })}
                 </div>
                 <div className="flex-1" />
-                <span className="text-[10px] text-gray-500">EDITING: <strong className="text-white">&quot;{selectedEntry.isSystem ? selectedEntry.slug : (selectedEntry.story?.title || selectedEntry.slug)}&quot;</strong></span>
-                <button onClick={() => scrollEntry('up')} className="ml-3 text-gray-500 hover:text-white text-[10px] px-0.5">▲</button>
-                <button onClick={() => scrollEntry('down')} className="text-gray-500 hover:text-white text-[10px] px-0.5">▼</button>
+                <span className="text-[10px] text-gray-400">EDITING: <strong className="text-gray-900 font-bold">&quot;{selectedEntry.isSystem ? selectedEntry.slug : (selectedEntry.story?.title || selectedEntry.slug)}&quot;</strong></span>
+                <button onClick={() => scrollEntry('up')} className="ml-3 text-gray-400 hover:text-gray-900 text-[10px] px-0.5">▲</button>
+                <button onClick={() => scrollEntry('down')} className="text-gray-400 hover:text-gray-900 text-[10px] px-0.5">▼</button>
+                
+                <button 
+                  onClick={() => setIsSplitView(!isSplitView)} 
+                  className={`ml-3 px-2 py-[3px] rounded text-[9px] font-bold transition-colors ${isSplitView ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:text-gray-900'}`}
+                >
+                  SPLIT VIEW {isSplitView ? 'ON' : 'OFF'}
+                </button>
+
                 <button onClick={saveChanges} disabled={updateStoryMutation.isPending} className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-bold px-3 py-[3px] rounded disabled:opacity-50">
                   {updateStoryMutation.isPending ? 'SAVING...' : 'SAVE CHANGES'}
                 </button>
-                <button onClick={() => { setDetailOpen(false); setSelectedEntryId(null); }} className="ml-1.5 text-gray-500 hover:text-white text-sm">✕</button>
+                <button onClick={() => { setDetailOpen(false); setSelectedEntryId(null); }} className="ml-1.5 text-gray-400 hover:text-gray-900 text-sm">✕</button>
               </div>
 
               {/* body */}
-              <div className="flex-1 overflow-auto p-2.5">
+              <div className="flex-1 overflow-y-auto p-4 pr-2 custom-scrollbar h-full">
                 {detailTab === 'SCRIPT' && (
-                  <div className="flex gap-3 h-full">
-                    <div className="w-[38%] flex flex-col">
-                      <div className="text-[9px] font-bold text-gray-500 tracking-wider mb-1">EDITORIAL NOTES</div>
+                  <div className={`flex ${isSplitView ? 'flex-col gap-4' : 'flex-row gap-4'} h-full min-h-0`}>
+                    {/* EDITORIAL NOTES */}
+                    <div className={`${isSplitView ? 'w-full h-fit' : 'w-[38%]'} flex flex-col bg-white p-3 rounded-xl border border-gray-200 shadow-sm`}>
+                      <h3 className="text-xs font-semibold text-gray-400 mb-2 tracking-wide uppercase">
+                        EDITORIAL NOTES
+                      </h3>
                       <textarea
-                        value={eNotes} onChange={(e) => setENotes(e.target.value)}
+                        ref={notesRef}
+                        value={eNotes} 
+                        onChange={(e) => {
+                          setENotes(e.target.value);
+                          resizeTextarea(e.target);
+                        }}
                         placeholder="Add production notes here..."
-                        className="flex-1 bg-gray-800/40 border border-gray-700/40 rounded px-2 py-1.5 text-[11px] text-gray-300 resize-none"
-                        style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                        className="w-full min-h-[80px] rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm text-gray-800 leading-relaxed resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
-                    <div className="w-[62%] flex flex-col gap-2.5">
-                      <div className="flex-1 flex flex-col">
-                        <div className="text-[9px] font-bold mb-1">
-                          <span className="text-red-500">●</span>{' '}
-                          <span className="text-red-400">ANCHOR SCRIPT</span>
-                          {selectedEntry.scriptContent && (
-                            <span className="ml-1.5 text-gray-600 font-normal">({selectedEntry.scriptSource || 'RAW'})</span>
-                          )}
+
+                    <div className={`${isSplitView ? 'w-full' : 'w-[62%]'} flex flex-col gap-4`}>
+                      {/* ANCHOR SCRIPT */}
+                      <div className="flex flex-col bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-xs font-semibold text-gray-400 tracking-wide uppercase">
+                            ANCHOR SCRIPT
+                          </h3>
                         </div>
                         <textarea
-                          value={eAnchor} onChange={(e) => setEAnchor(e.target.value)}
+                          ref={anchorRef}
+                          value={eAnchor} 
+                          onChange={(e) => {
+                            setEAnchor(e.target.value);
+                            resizeTextarea(e.target);
+                          }}
                           placeholder="Type anchor script here..."
-                          className="flex-1 bg-gray-800/40 border border-gray-700/40 rounded px-2 py-1.5 text-[11px] text-gray-300 resize-none whitespace-pre-wrap"
-                          style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', minHeight: '80px' }}
+                          className="w-full min-h-[80px] rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm text-gray-800 leading-relaxed resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
-                      <div className="flex-1 flex flex-col">
-                        <div className="text-[9px] font-bold mb-1">
-                          <span className="text-yellow-500">●</span>{' '}
-                          <span className="text-yellow-400">VOICEOVER / PKG SCRIPT</span>
-                        </div>
+
+                      {/* VOICEOVER SCRIPT */}
+                      <div className="flex flex-col bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+                        <h3 className="text-xs font-semibold text-gray-400 mb-2 tracking-wide uppercase">
+                          VOICEOVER / PKG SCRIPT
+                        </h3>
                         <textarea
-                          value={eVO} onChange={(e) => setEVO(e.target.value)}
+                          ref={voRef}
+                          value={eVO} 
+                          onChange={(e) => {
+                            setEVO(e.target.value);
+                            resizeTextarea(e.target);
+                          }}
                           placeholder="Type voiceover script here..."
-                          className="flex-1 bg-gray-800/40 border border-gray-700/40 rounded px-2 py-1.5 text-[11px] text-gray-300 resize-none whitespace-pre-wrap"
-                          style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', minHeight: '80px' }}
+                          className="w-full min-h-[80px] rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm text-gray-800 leading-relaxed resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* ── CHANGE 2: CLIPS tab — show displayLabel, search by label ── */}
                 {detailTab === 'CLIPS' && (
-                  <div>
+                  <div className="flex flex-col h-full">
                     {selectedEntry.isSystem ? (
                       <div className="text-gray-600 text-[10px]">System rows have no clips.</div>
-                    ) : (selectedEntry.clips || []).length === 0 ? (
-                      <div className="text-gray-600 text-[10px]">No clips attached to this story.</div>
                     ) : (
-                      <table className="w-full text-[10px]">
-                        <thead>
-                          <tr className="text-gray-500 text-[9px] border-b border-gray-800/60">
-                            <th className="py-1 px-2 text-left">CLIP NAME</th>
-                            <th className="py-1 px-2 text-left">ORIGINAL</th>
-                            <th className="py-1 px-2 text-center">DURATION</th>
-                            <th className="py-1 px-2 text-center">STATUS</th>
-                            <th className="py-1 px-2 text-left">DISPLAY LABEL</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(selectedEntry.clips || []).map((c) => (
-                            <tr key={c.clipId} className="border-b border-gray-800/30">
-                              <td className="py-1 px-2 font-mono text-green-400">{getClipDisplayName(c)}</td>
-                              <td className="py-1 px-2 text-gray-500">{c.originalFileName}</td>
-                              <td className="py-1 px-2 text-center font-mono">{c.duration || '--:--'}</td>
-                              <td className="py-1 px-2 text-center">
-                                <span className={`text-[8px] font-bold px-1.5 py-[1px] rounded ${c.status === 'DONE' || c.status === 'COMPLETED' || c.status === 'APPROVED' ? 'bg-green-600/20 text-green-400' : c.status === 'EDITING' || c.status === 'AVAILABLE' ? 'bg-yellow-600/20 text-yellow-500' : 'bg-gray-600/20 text-gray-400'}`}>{c.status}</span>
-                              </td>
-                              <td className="py-1 px-2">{c.displayLabel || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <>
+                        <div className="flex items-center gap-2 mb-4">
+                          <input
+                            type="file"
+                            ref={clipInputRef}
+                            onChange={handleClipUpload}
+                            accept="video/*"
+                            className="hidden"
+                          />
+                          <button
+                            onClick={() => clipInputRef.current?.click()}
+                            disabled={isUploadingClip}
+                            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+                          >
+                            <Plus size={12} />
+                            {isUploadingClip ? 'ATTACHING...' : 'ATTACH CLIP'}
+                          </button>
+                          <button
+                            onClick={openLibrary}
+                            className="text-[10px] font-bold px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded transition-colors"
+                          >
+                            BROWSE LIBRARY
+                          </button>
+                        </div>
+
+                        {(selectedEntry.clips || []).length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+                            <Film size={24} className="text-gray-300 mb-2" />
+                            <p className="text-gray-400 text-[10px]">No clips attached yet.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {(selectedEntry.clips || []).map((c) => (
+                              <div key={c.clipId} className="flex items-center justify-between p-2 bg-white border border-gray-200 rounded-lg group hover:border-blue-300 transition-all">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="w-8 h-8 rounded bg-green-50 flex items-center justify-center text-green-600 shrink-0">
+                                    <Film size={14} />
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="font-mono text-[10px] text-green-600 font-bold truncate">
+                                      {getClipDisplayName(c)}
+                                    </span>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      <span className="text-[9px] text-gray-400 font-mono">{c.duration || '--:--'}</span>
+                                      <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${c.status === 'DONE' || c.status === 'COMPLETED' || c.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                        {c.status}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={() => playClip(c)}
+                                    className={`p-1.5 rounded transition-all ${previewClip?.clipId === c.clipId ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                                    title="Preview Clip"
+                                  >
+                                    <Play size={14} fill={previewClip?.clipId === c.clipId ? "currentColor" : "none"} />
+                                  </button>
+                                  <button
+                                    onClick={() => deleteClipMutation.mutate(c.clipId)}
+                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+                                    title="Remove Clip"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
@@ -1060,25 +1373,25 @@ export default function RundownPage() {
                         <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       </div>
                     ) : cgItems.length === 0 ? (
-                      <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-800/40 rounded-lg bg-gray-900/10 py-10">
-                        <Layers className="w-8 h-8 text-gray-700 mb-2" />
-                        <p className="text-gray-500 text-[10px]">No graphics for this story.</p>
-                        <p className="text-gray-700 text-[9px] mt-1">Add lower thirds, locators, or full screens.</p>
+                      <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-lg bg-gray-50 py-10">
+                        <Layers className="w-8 h-8 text-gray-300 mb-2" />
+                        <p className="text-gray-400 text-[10px]">No graphics for this story.</p>
+                        <p className="text-gray-400 text-[9px] mt-1">Add lower thirds, locators, or full screens.</p>
                       </div>
                     ) : (
                       <div className="flex-1 overflow-auto space-y-2 pr-1">
                         {cgItems.map((cg: any) => (
-                          <div key={cg.cgItemId} className="group flex items-center gap-3 p-2 bg-gray-800/20 border border-gray-700/30 rounded-lg hover:border-gray-600/50 transition-all">
-                            <div className="cursor-grab text-gray-700 hover:text-gray-500">
+                          <div key={cg.cgItemId} className="group flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg hover:border-blue-200 transition-all shadow-sm">
+                            <div className="cursor-grab text-gray-300 hover:text-gray-500">
                               <GripVertical size={14} />
                             </div>
                             
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-0.5">
-                                <span className="bg-blue-600/10 text-blue-400 text-[8px] font-bold px-1.5 py-0.5 rounded border border-blue-500/20">
+                                <span className="bg-blue-50 text-blue-600 text-[8px] font-bold px-1.5 py-0.5 rounded border border-blue-100">
                                   {cg.templateName}
                                 </span>
-                                <span className="text-[11px] font-bold text-white truncate">
+                                <span className="text-[11px] font-bold text-gray-900 truncate">
                                   {cg.fieldData?.Name || cg.fieldData?.Headline || cg.fieldData?.Quote || 'Untitled Graphic'}
                                 </span>
                               </div>
@@ -1089,7 +1402,7 @@ export default function RundownPage() {
                             </div>
 
                             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <div className="flex items-center gap-1.5 bg-gray-900/50 rounded-md p-0.5 border border-gray-700/50">
+                              <div className="flex items-center gap-1.5 bg-gray-50 rounded-md p-0.5 border border-gray-200">
                                 {['DRAFT', 'READY', 'ON_AIR'].map((s) => (
                                   <button
                                     key={s}
@@ -1125,25 +1438,25 @@ export default function RundownPage() {
 
       {/* ══════ CREATE MODAL ══════ */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowCreateModal(false)}>
-          <div className="bg-[#131820] border border-gray-700/60 rounded-lg p-4 w-[420px] max-h-[75vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-sm font-bold mb-3">Create Empty Story</h2>
-            <div className="space-y-2">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowCreateModal(false)}>
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 w-[420px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-4 text-gray-900">Create Empty Story</h2>
+            <div className="space-y-4">
               <div>
-                <label className="text-[9px] text-gray-500">Title *</label>
-                <input value={nTitle} onChange={(e) => setNTitle(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px]" placeholder="Story title..." />
+                <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Title *</label>
+                <input value={nTitle} onChange={(e) => setNTitle(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900" placeholder="Story title..." />
               </div>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="text-[9px] text-gray-500">Format</label>
-                  <select value={nFormat} onChange={(e) => setNFormat(e.target.value as Story['format'])} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px]">
+                  <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Format</label>
+                  <select value={nFormat} onChange={(e) => setNFormat(e.target.value as Story['format'])} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900">
                     <option value="">Select...</option>
                     <option value="ANCHOR">ANCHOR</option><option value="PKG">PKG</option><option value="VO">VO</option>
                     <option value="VO+BITE">VO+BITE</option><option value="LIVE">LIVE</option><option value="GFX">GFX</option>
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="text-[9px] text-gray-500 uppercase font-bold">Planned Date</label>
+                  <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Planned Date</label>
                   <input
                     type="text"
                     readOnly
@@ -1153,7 +1466,7 @@ export default function RundownPage() {
                       month: 'short',
                       day: 'numeric',
                     })}
-                    className="w-full bg-gray-800/30 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] text-gray-400 cursor-not-allowed opacity-80"
+                    className="w-full bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-500 cursor-not-allowed"
                     title="Auto-detected from selected rundown date"
                   />
                 </div>
@@ -1171,27 +1484,77 @@ export default function RundownPage() {
 
       {/* ══════ ADD EXISTING MODAL ══════ */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
-          <div className="bg-[#131820] border border-gray-700/60 rounded-lg p-4 w-[420px] max-h-[75vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-sm font-bold mb-3">Add Existing Story</h2>
-            <input value={addSearch} onChange={(e) => setAddSearch(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 text-[11px] mb-2" placeholder="Search stories..." />
-            <div className="space-y-1 max-h-[350px] overflow-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 w-[420px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-4 text-gray-900">Add Existing Story</h2>
+            <input value={addSearch} onChange={(e) => setAddSearch(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 mb-4" placeholder="Search stories..." />
+            <div className="space-y-2 max-h-[350px] overflow-auto pr-1">
               {filteredExisting.length === 0 ? (
-                <div className="text-gray-600 text-[10px] py-3 text-center">No available stories</div>
+                <div className="text-gray-400 text-sm py-8 text-center">No available stories</div>
               ) : filteredExisting.map((s) => (
-                <div key={s.storyId} className="flex items-center justify-between bg-gray-800/40 rounded px-2 py-1.5">
+                <div key={s.storyId} className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 hover:border-blue-200 transition-colors">
                   <div>
-                    <div className="text-[11px] font-semibold">{s.title}</div>
-                    <div className="text-[9px] text-gray-500">{s.storyId} · {s.format || '—'} · {s.status}</div>
+                    <div className="text-sm font-semibold text-gray-900">{s.title}</div>
+                    <div className="text-[10px] text-gray-400 font-mono uppercase">{s.storyId} • {s.format || '—'} • {s.status}</div>
                   </div>
-                  <button onClick={() => addExisting(s.storyId)} disabled={sendToRundownMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-bold px-2 py-[2px] rounded disabled:opacity-40">
-                    {sendToRundownMutation.isPending ? '...' : 'Add'}
+                  <button onClick={() => addExisting(s.storyId)} disabled={sendToRundownMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg disabled:opacity-40">
+                    {sendToRundownMutation.isPending ? '...' : 'ADD'}
                   </button>
                 </div>
               ))}
             </div>
-            <div className="flex justify-end mt-3">
-              <button onClick={() => setShowAddModal(false)} className="px-3 py-1 text-[10px] text-gray-400 hover:text-white">Close</button>
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm text-gray-400 hover:text-gray-900 font-bold">CLOSE</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PREVIEW MODAL ── */}
+      {previewClip && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999]"
+          onClick={() => setPreviewClip(null)}
+        >
+          <div 
+            className="bg-[#111827] border border-gray-700 rounded-xl w-[90%] max-w-4xl overflow-hidden relative shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-gray-900/50">
+              <div className="flex items-center gap-3">
+                <Film size={18} className="text-blue-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-gray-100 truncate max-w-[400px]">
+                    Preview: {previewClip.originalFileName}
+                  </h3>
+                  <div className="text-[10px] text-gray-500 font-mono">{previewClip.clipId}</div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setPreviewClip(null)}
+                className="p-1.5 hover:bg-gray-800 rounded-full transition-colors text-gray-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="bg-black aspect-video flex items-center justify-center">
+              <video 
+                src={previewClip.fileUrl || ''} 
+                controls 
+                autoPlay 
+                className="max-h-full max-w-full"
+              />
+            </div>
+
+            <div className="p-4 bg-gray-900/30 flex justify-between items-center text-[10px] text-gray-500">
+              <span>{previewClip.duration || '00:00:00'} • {previewClip.fileType}</span>
+              <button 
+                onClick={() => setPreviewClip(null)}
+                className="bg-white text-black font-bold px-4 py-1.5 rounded hover:bg-gray-200 transition-colors"
+              >
+                CLOSE
+              </button>
             </div>
           </div>
         </div>
