@@ -17,14 +17,15 @@ This document provides a comprehensive overview of the **News Forge** project—
 
 | Layer | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | [Next.js 14](https://nextjs.org/) (App Router) | React Framework for UI and SEO |
+| **Frontend** | [Next.js 14/15](https://nextjs.org/) (App Router) | React Framework for UI and SEO |
 | **Language** | [TypeScript](https://www.typescriptlang.org/) | Type-safe development |
 | **Styling** | [Vanilla CSS](https://developer.mozilla.org/en-US/docs/Web/CSS) + [Tailwind CSS 4](https://tailwindcss.com/) | Modern, dense, dark-themed UI |
 | **State Management** | [Zustand](https://github.com/pmndrs/zustand) | Global state for stories, clips, and rundowns |
 | **Database** | [PostgreSQL](https://www.postgresql.org/) | Persistent relational data store |
 | **ORM** | [Prisma](https://www.prisma.io/) | Database schema management and client |
 | **Icons** | [Lucide React](https://lucide.dev/) | Consistent modern iconography |
-| **Fonts** | Inter, JetBrains Mono, Noto Sans Kannada | Readability and script support |
+| **Authentication** | [NextAuth.js](https://next-auth.js.org/) | Secure user sessions and role-based access |
+| **Real-time** | SSE (Server-Sent Events) | Live updates across clients |
 
 ---
 
@@ -33,7 +34,7 @@ This document provides a comprehensive overview of the **News Forge** project—
 ```text
 /News-Forge
 ├── prisma/                  # Database schema (schema.prisma) and migrations
-├── public/                  # Static assets (fonts, icons)
+├── public/                  # Static assets (fonts, icons, protocol reg)
 ├── src/
 │   ├── app/                 # Next.js App Router (Pages & API)
 │   │   ├── (main)/          # Principal functional tabs
@@ -43,15 +44,17 @@ This document provides a comprehensive overview of the **News Forge** project—
 │   │   │   ├── rundown/     # Broadcast Schedule & Playout
 │   │   │   ├── settings/    # System Configuration
 │   │   │   └── workspace/   # User Profile & Preferences
-│   │   └── api/             # Backend API Implementation
+│   │   ├── api/             # Backend API Implementation
+│   │   └── login/           # Auth landing page
 │   ├── components/          # Reusable UI components
-│   ├── store/               # Zustand global state (useNewsForgeStore.ts)
-│   ├── lib/                 # Shared logic (prisma client, utils)
+│   ├── hooks/               # Custom React hooks (useAuth, useSSE, etc.)
+│   ├── store/               # Zustand global state
+│   ├── lib/                 # Shared logic (prisma, auth, event-bus, clients)
 │   ├── types/               # TypeScript definitions
 │   └── utils/               # Helper functions
-├── AGENTS.md                # Comprehensive requirements and spec document
-├── CLAUDE.md                # Development guidelines and commands
-└── package.json             # Dependencies and scripts
+├── AGENTS.md                # AI Agent roadmap and specs
+├── ARCHITECTURE.md          # Technical deep dive
+└── README.md                # Setup and installation
 ```
 
 ---
@@ -66,7 +69,6 @@ erDiagram
     Story ||--o{ StoryClip : "contains"
     Story ||--o{ RundownEntry : "linked to"
     Rundown ||--o{ RundownEntry : "composed of"
-    Rundown ||--o{ Story : "primary stories"
 
     User {
         string userId PK
@@ -86,7 +88,6 @@ erDiagram
         string rawScript
         string polishedScript
         string editorialNotes
-        string rundownId FK
     }
 
     StoryClip {
@@ -113,18 +114,13 @@ erDiagram
 ## 5. Core Workflows
 
 ### 5.1 The Editorial Pipeline
-1.  **Input**: Team creates a story and uploads raw clips/text. A **Story ID** is auto-generated (e.g., `STY-2025-0042-KN`).
+1.  **Input**: Team creates a story and uploads raw clips/text. A **Story ID** is auto-generated (e.g., `STY-20260423-421`).
 2.  **Output**: Team adds editorial notes and clip instructions. They transition clips from `PENDING` to `AVAILABLE`.
 3.  **Editor Hub**: 
     - **Copy Editors**: Write and refine scripts in the bilingual editor.
-    - **Video Editors**: Claim `AVAILABLE` clips, edit them in external tools (Premiere/DaVinci), and save to the `/edited/` directory.
+    - **Video Editors**: Claim `AVAILABLE` clips, edit them in external tools, and save to the output directory.
 4.  **Linking**: The system auto-detects finished files and links them back to stories using Story ID metadata.
 5.  **Rundown**: Producers organize stories into a timeline, manage timing, and trigger playout/teleprompter feeds.
-
-### 5.2 Story ID & Media Management
-- **Format**: `STY-[YYYY]-[Sequential Number]-[Language]`
-- **Sidecar JSON**: A `manifest.json` accompanies media folders to maintain metadata without relying on fragile video headers.
-- **Proxy Work**: A background service (FFmpeg) auto-generates 720p H.264 previews for every uploaded raw clip.
 
 ---
 
@@ -134,50 +130,42 @@ erDiagram
 | :--- | :--- | :--- |
 | **Top Navigation** | ✅ Completed | Fixed nav with workspace, input, output, hub, rundown, settings. |
 | **Dark Theme** | ✅ Completed | Professional charcoal theme implemented. |
-| **Zustand Store** | ✅ Completed | Integrated with persistence and seed data. |
 | **User Auth** | ✅ Completed | NextAuth implemented with custom credentials and middleware. |
 | **Real-time (SSE)** | ✅ Completed | In-process event bus and `/api/events` for live updates. |
 | **Viz Pilot** | ✅ Completed | Custom `vizpilot://` protocol launching local `.bat` file. |
-| **Input Page** | 🟡 In Progress | Story creation active; local media ingestion needs final hookup. |
-| **Editor Hub** | 🟢 Polished | Dual-mode (Video/Copy) UI state working. |
-| **Rundown** | ✅ Polished | Fully integrated with story ordering, timing, and MOS. |
-| **Settings** | 🟡 Basic | UI layout ready; actual state persistence per section in progress. |
-| **Prompter MOS** | ✅ Completed | Dedicated TCP server (Port 10541) for script delivery. |
-| **CasparCG** | 🟡 Testing | Basic playout commands active; playlist sync in progress. |
+| **Prompter MOS** | ✅ Completed | TCP server (Port 10541) with Big Endian UTF-16 framing. |
+| **CasparCG** | ✅ Completed | API routes and AMCP client for full playout control. |
+| **Rundown Editor** | ✅ Polished | Fully integrated with story ordering, timing, and MOS. |
+| **Editor Hub** | ✅ Polished | Dual-mode (Video/Copy) UI state working. |
+| **Input Page** | 🟡 In Progress | Story creation active; local media ingestion in testing. |
+| **File Watcher** | 🟡 Planned | Automated folder monitoring for proxy generation. |
 
 ---
 
 ## 7. Setup & Development
 
 ### Local Environment
-1.  **Clone & Install**:
-    ```bash
-    npm install
-    ```
+1.  **Clone & Install**: `npm install`
 2.  **Database Setup**:
     - Ensure PostgreSQL is running.
-    - Update `.env` with `DATABASE_URL`.
-    - Push schema: `npx prisma db push`
-    - Seed data: `npm run prisma:seed`
-3.  **Run Development**:
-    ```bash
-    npm run dev
-    ```
+    - `npx prisma db push`
+    - `npm run prisma:seed`
+3.  **Run Development**: `npm run dev`
 
 ### Key Environment Variables
 - `DATABASE_URL`: Connection string for PostgreSQL.
 - `NEXTAUTH_SECRET`: Secret for NextAuth session encryption.
-- `NEXTAUTH_URL`: Base URL of the application.
-- `STORAGE_BASE_PATH`: Local directory for raw/edited media storage.
-- `FFMPEG_PATH`: Path to FFmpeg binary for proxy generation.
+- `NEXTAUTH_URL`: Base URL (e.g., `http://192.168.1.126:3000`).
+- `CASPAR_HOST` / `CASPAR_PORT`: CasparCG server details.
+- `PROMPTER_PORT`: Port for MOS bridge (default 10541).
 
 ---
 
-## 8. Development Guidelines (Heads-up for Tech Team)
-- **State over Prop Drilling**: Always use the Zustand `useNewsForgeStore` for global entities (Stories/Clips).
-- **Responsive Density**: Keep UI elements compact. Newsroom users prefer seeing more data over more whitespace.
-- **Bilingual First**: Always test script editor with both Kannada and English characters to ensure proper line-height and font rendering.
-- **File Watcher Safety**: When implementing the file watcher, handle file locking gracefully as editors may still be writing to the output directory.
+## 8. Development Guidelines
+- **State Persistence**: Critical entities use Zustand with persistence.
+- **Real-time First**: When adding mutations, always use `emitStoryEvent`, `emitClipEvent`, etc.
+- **Encoding Alert**: MOS communication MUST use Big Endian UTF-16 with null-byte terminators.
+- **Bilingual First**: Always test scripts with Kannada glyphs to ensure rendering integrity.
 
 ---
-*Documentation updated to reflect latest codebase.*
+*Documentation updated to reflect latest codebase (2026-04-23).*

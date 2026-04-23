@@ -1,0 +1,13 @@
+[IEHelper] Args: --parent 131234 --url file:///C:/NewsForge/newsroom-connect.html --x 0 --y 30 --width 480 --height 600
+[IEHelper] === IEHelper Starting ===
+[IEHelper] IntPtr.Size=8  64-bit=True
+[IEHelper] Parent HWND: 0x200A2
+[IEHelper] Client coords: 0,30  Size: 480x600
+[IEHelper] URL: file:///C:/NewsForge/newsroom-connect.html
+[IEHelper] Parent window valid: False
+[IEHelper] IE11 emulation OK: IEHelper.exe
+[IEHelper] ActiveX OK
+[IEHelper] Form handle: 0x390B86
+[IEHelper] No valid parent — standalone mode
+[IEHelper] Navigating to: file:///C:/NewsForge/newsroom-connect.html
+[IEHelper] Loaded: file:///C:/NewsForge/newsroom-connect.html

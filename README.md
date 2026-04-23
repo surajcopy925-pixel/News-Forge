@@ -21,7 +21,7 @@ Create a `.env` file based on your environment. Ensure you have the following ke
 ```env
 DATABASE_URL="postgresql://user:pass@localhost:5432/newsforge"
 NEXTAUTH_URL="http://192.168.1.126:3000"
-NEXTAUTH_SECRET="generate-a-secure-secret-here"
+NEXTAUTH_SECRET="your-secret-here"
 ```
 
 ### 3. Database Setup

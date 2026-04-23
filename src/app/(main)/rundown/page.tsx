@@ -847,7 +847,7 @@ export default function RundownPage() {
       )}
 
       {/* ══════ MAIN ══════ */}
-      <div className={`flex-1 flex flex-col min-w-0 ${isSplitView ? 'w-full' : ''}`}>
+      <div className={`flex-1 flex flex-col min-w-0 ${isSplitView ? 'w-full' : ''}`} style={{ marginLeft: showTemplateBrowser ? '420px' : '0px', transition: 'margin-left 0.2s ease' }}>
         {/* action bar */}
         <div className="flex items-center gap-1 px-3 py-1 border-b border-gray-200 bg-gray-50">
           {/* CHANGE 4: sidebar collapse toggle */}
@@ -1360,7 +1360,10 @@ export default function RundownPage() {
                     <div className="flex items-center justify-between mb-3">
                       <div className="text-[10px] font-bold text-gray-500 tracking-wider">GRAPHICS ({cgItems.length})</div>
                       <button 
-                        onClick={() => setShowTemplateBrowser(true)}
+                        onClick={() => {
+                          setShowTemplateBrowser(true);
+                          setDetailTab('SCRIPT');
+                        }}
                         className="flex items-center gap-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[9px] font-bold px-2 py-1 rounded border border-blue-500/30 transition-colors"
                       >
                         <Plus size={12} />

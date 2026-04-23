@@ -296,8 +296,8 @@ export default function TemplateBrowser({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-lg shadow-xl w-[700px] max-h-[85vh] flex flex-col overflow-hidden">
+    <div className="fixed top-0 left-0 z-50 h-full flex flex-col" style={{ width: '420px' }}>
+      <div className="bg-white h-full flex flex-col overflow-hidden border-r border-gray-300" style={{ boxShadow: '4px 0 15px rgba(0,0,0,0.15)' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
           <div className="flex items-center gap-3">

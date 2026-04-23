@@ -51,7 +51,8 @@ The application state (Stories, Clips, Rundowns) is managed globally using **Zus
 ### 2.3 User Authentication & NextAuth
 Authentication is handled via **NextAuth.js** with a Custom Credentials Provider.
 - Sessions are managed server-side and checked on route access via middleware.
-- API endpoints are protected using server-side session checks to ensure data security.
+- API endpoints are protected using server-side session checks via `getCurrentUserId()`.
+- Supports role-based access control (PRODUCER, EDITOR, REPORTER, etc.).
 
 ### 2.4 Real-time Updates (SSE)
 A lightweight Server-Sent Events (SSE) implementation is used for real-time collaboration.
@@ -62,20 +63,26 @@ A lightweight Server-Sent Events (SSE) implementation is used for real-time coll
 ### 2.5 Viz Pilot Integration (Local Protocol)
 Instead of relying on server-side launchers, Viz Pilot is integrated directly on the client's workstation:
 - **Custom Protocol**: Windows workstations register a `vizpilot://` protocol using a provided `.reg` file.
-- **Bat Execution**: The browser triggers the protocol, which executes a local `.bat` file on the machine, passing story context as parameters to launch Viz Pilot locally.
+- **Bat Execution**: The browser triggers the protocol, which executes a local `.bat` file on the machine, passing story context as parameters to launch Viz Pilot locally in Edge IE-mode.
 
 ### 2.6 Teleprompter MOS Bridge (TCP)
 To support real-time script delivery to Teleprompter software (e.g., WinPlus):
 - **TCP Server**: A dedicated `PrompterClient` runs a raw TCP server (default port 10541).
 - **MOS Handshake**: Implements the MOS 2.8.3 handshake (`mosID`, `ncsID`, `heartbeat`).
-- **Data Mapping**: Fetches rundown stories and prioritizes `anchorScript` for prompter text.
+- **Data Encoding**: Uses **Big Endian UTF-16** encoding and **Null-byte (`\0\0`) framing** to ensure compatibility with legacy prompter systems.
 - **Rundown Delivery**: Sends the entire rundown as an `roCreate` XML message, and supports incremental `roStoryReplace` on edit.
 
-### 2.7 File-Based Media Workflow
+### 2.7 CasparCG Playout Integration
+Direct integration with CasparCG Server for broadcast playout:
+- **TCP Command Pipeline**: Uses the AMCP protocol over TCP (port 5250) to control CasparCG.
+- **Sub-route API**: Individual API routes for `play`, `stop`, `load`, and `media` status management.
+- **Playlist Sync**: Synchronizes rundown entries with CasparCG layers for seamless transitions.
+
+### 2.8 File-Based Media Workflow
 To handle large broadcast-quality media files without overloading the database:
 - Raw files are stored on a high-speed local drive/NAS.
 - Only metadata and file paths are stored in PostgreSQL.
-- A **File Watcher** (planned) monitors folders to update clip statuses automatically.
+- **Proxy Generation**: A utility (`src/lib/proxy-generator.ts`) uses FFmpeg to generate 540p H.264 previews and thumbnails for web viewing.
 
 ## 3. Detailed Data Models
 
@@ -90,8 +97,8 @@ Stories are the central unit of work. They can be created in the `Input` tab and
 Clips belong to a story and have a lifecycle:
 - `PENDING`: Uploaded but no instructions.
 - `AVAILABLE`: Ready for video editors.
-- `EDITING` (or `IN_PROGRESS`): Claimed by an editor.
-- `DONE` (or `COMPLETED`): Finished file saved to output directory.
+- `EDITING`: Claimed by an editor.
+- `COMPLETED`: Finished file saved to output directory.
 
 ## 4. Bilingual Implementation (Kannada & English)
 The system uses `Noto Sans Kannada` as the primary font for Kannada scripts to ensure proper rendering of complex glyphs in news scripts.
@@ -114,4 +121,4 @@ ffmpeg -i {input_path} -vcodec libx264 -crf 28 -acodec aac -s 1280x720 {proxy_pa
 This ensures editors can preview footage in the browser without downloading gigabytes of raw data.
 
 ---
-*Documentation updated to reflect latest codebase.*
+*Documentation updated to reflect latest codebase (Phase 3.8 complete).*
