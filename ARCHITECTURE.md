@@ -39,8 +39,8 @@ graph TD
 
 ## 2. Key Architectural Decisions
 
-### 2.1 Unified Next.js Application
-Instead of separating frontend and backend, we use Next.js for both. This simplifies deployment and sharing of TypeScript types between the UI and API. API routes handle DB interactions via Prisma.
+### 2.1 Unified Next.js 16 Application
+Instead of separating frontend and backend, we use Next.js 16 (React 19) for both. This simplifies deployment and sharing of TypeScript types between the UI and API. API routes handle DB interactions via Prisma.
 
 ### 2.2 Global State with Zustand
 The application state (Stories, Clips, Rundowns) is managed globally using **Zustand**. 
@@ -70,13 +70,15 @@ To support real-time script delivery to Teleprompter software (e.g., WinPlus):
 - **TCP Server**: A dedicated `PrompterClient` runs a raw TCP server (default port 10541).
 - **MOS Handshake**: Implements the MOS 2.8.3 handshake (`mosID`, `ncsID`, `heartbeat`).
 - **Data Encoding**: Uses **Big Endian UTF-16** encoding and **Null-byte (`\0\0`) framing** to ensure compatibility with legacy prompter systems.
-- **Rundown Delivery**: Sends the entire rundown as an `roCreate` XML message, and supports incremental `roStoryReplace` on edit.
+- **Rundown Delivery**: Supports both **Push** (NCS to Prompter) and **Pull** (Prompter requesting from NCS) models.
+- **Persistence**: Rundown data is cached locally to survive server restarts and ensure immediate availability on client reconnection.
 
 ### 2.7 CasparCG Playout Integration
 Direct integration with CasparCG Server for broadcast playout:
 - **TCP Command Pipeline**: Uses the AMCP protocol over TCP (port 5250) to control CasparCG.
-- **Sub-route API**: Individual API routes for `play`, `stop`, `load`, and `media` status management.
-- **Playlist Sync**: Synchronizes rundown entries with CasparCG layers for seamless transitions.
+- **Granular API**: Dedicated sub-routes for `play`, `stop`, `load`, `next`, `pause`, `resume`, and `clear`.
+- **Media Scanning**: Integrated media scanning to verify asset availability on the CasparCG server before playout.
+- **Playlist Sync**: Synchronizes rundown entries with CasparCG layers for seamless transitions and automated playback.
 
 ### 2.8 File-Based Media Workflow
 To handle large broadcast-quality media files without overloading the database:
@@ -121,4 +123,4 @@ ffmpeg -i {input_path} -vcodec libx264 -crf 28 -acodec aac -s 1280x720 {proxy_pa
 This ensures editors can preview footage in the browser without downloading gigabytes of raw data.
 
 ---
-*Documentation updated to reflect latest codebase (Phase 3.8 complete).*
+*Documentation updated to reflect latest codebase (Phase 3.8 complete - 2026-04-24).*

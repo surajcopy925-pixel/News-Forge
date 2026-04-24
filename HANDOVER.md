@@ -17,7 +17,7 @@ This document provides a comprehensive overview of the **News Forge** project—
 
 | Layer | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | [Next.js 14/15](https://nextjs.org/) (App Router) | React Framework for UI and SEO |
+| **Frontend** | [Next.js 16](https://nextjs.org/) (App Router) | React 19 Framework for UI and SEO |
 | **Language** | [TypeScript](https://www.typescriptlang.org/) | Type-safe development |
 | **Styling** | [Vanilla CSS](https://developer.mozilla.org/en-US/docs/Web/CSS) + [Tailwind CSS 4](https://tailwindcss.com/) | Modern, dense, dark-themed UI |
 | **State Management** | [Zustand](https://github.com/pmndrs/zustand) | Global state for stories, clips, and rundowns |
@@ -137,8 +137,8 @@ erDiagram
 | **CasparCG** | ✅ Completed | API routes and AMCP client for full playout control. |
 | **Rundown Editor** | ✅ Polished | Fully integrated with story ordering, timing, and MOS. |
 | **Editor Hub** | ✅ Polished | Dual-mode (Video/Copy) UI state working. |
-| **Input Page** | 🟡 In Progress | Story creation active; local media ingestion in testing. |
-| **File Watcher** | 🟡 Planned | Automated folder monitoring for proxy generation. |
+| **Input Page** | ✅ Polished | Story creation active; local media ingestion and metadata extraction working. |
+| **File Watcher** | 🟡 In Progress | Automated folder monitoring and background proxy generation logic in development. |
 
 ---
 
@@ -168,4 +168,4 @@ erDiagram
 - **Bilingual First**: Always test scripts with Kannada glyphs to ensure rendering integrity.
 
 ---
-*Documentation updated to reflect latest codebase (2026-04-23).*
+*Documentation updated to reflect latest codebase (2026-04-24).*

@@ -10,7 +10,7 @@ import {
   PenTool, 
   LayoutList, 
   Settings, 
-  Bell 
+  Bell
 } from 'lucide-react';
 
 const TABS = [
@@ -66,11 +66,11 @@ export default function TopNav() {
         </Link>
       </div>
 
-      {/* CENTER: Navigation Tabs */}
       <div className="flex-1 flex items-center gap-1">
         {TABS.map((tab) => {
           const isActive = pathname === tab.href || pathname?.startsWith(tab.href + '/');
           const Icon = tab.icon;
+
           return (
             <Link
               key={tab.id}

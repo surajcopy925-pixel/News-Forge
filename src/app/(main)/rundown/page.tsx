@@ -302,9 +302,30 @@ export default function RundownPage() {
     }
   };
 
-  const handleGoLive = () => {
-    if (!selectedRundown || !mosStatus?.connected) return;
-    sendToViz.mutate({ rundownId: selectedRundown.rundownId, action: 'create' });
+  const handleGoLive = async () => {
+    if (!selectedRundown) return;
+
+    // Step 1: Mark rundown as LIVE in the database (auto-removes other LIVE rundowns)
+    try {
+      const res = await fetch(`/api/rundowns/${selectedRundown.rundownId}/golive`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ live: true }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        console.log(`Rundown ${selectedRundown.rundownId} is now LIVE`);
+        // Refresh the rundown list to reflect status changes
+        queryClient.invalidateQueries({ queryKey: ['rundowns'] });
+      }
+    } catch (err) {
+      console.error('Failed to set rundown live:', err);
+    }
+
+    // Step 2: Send to Viz if MOS is connected (existing behavior)
+    if (mosStatus?.connected) {
+      sendToViz.mutate({ rundownId: selectedRundown.rundownId, action: 'create' });
+    }
   };
 
   const handleUpdateViz = () => {
@@ -964,9 +985,9 @@ export default function RundownPage() {
             )}
             <button
               onClick={handleGoLive}
-              disabled={!selectedRundown || !mosStatus?.connected || sendToViz.isPending}
+              disabled={!selectedRundown || sendToViz.isPending}
               className={`text-[10px] font-bold px-3 py-1 rounded transition-colors ${
-                mosStatus?.connected && selectedRundown
+                selectedRundown
                   ? sendToViz.isSuccess
                     ? 'bg-green-600 text-white hover:bg-green-700'
                     : 'bg-red-600 text-white hover:bg-red-700'

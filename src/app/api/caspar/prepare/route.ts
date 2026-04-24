@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
       }
     } else if (rundownId === 'UNASSIGNED' || (!rundownId && !storyId)) {
       // Get ALL clips
-      const allClips = await prisma.clip.findMany({
+      const allClips = await prisma.storyClip.findMany({
         where: { fileName: { not: '' } },
       });
       for (const clip of allClips) {

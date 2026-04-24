@@ -11,6 +11,7 @@ export async function GET() {
 
     try {
       rundowns = await prisma.rundown.findMany({
+        where: { status: 'LIVE' },
         orderBy: { createdAt: 'desc' },
         include: {
           entries: {
@@ -32,6 +33,7 @@ export async function GET() {
     } catch (includeErr) {
       console.log(`[playlists] Include failed, trying without: ${includeErr}`);
       rundowns = await prisma.rundown.findMany({
+        where: { status: 'LIVE' },
         orderBy: { createdAt: 'desc' },
       });
     }
@@ -190,16 +192,33 @@ export async function GET() {
 
     playlists.sort((a: any, b: any) => b.clipCount - a.clipCount);
 
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    };
+
     return NextResponse.json({
       success: true,
       playlists,
       totalRundowns: rundowns.length,
-    });
+    }, { headers });
   } catch (error) {
     console.error('[playlists] ERROR:', error);
     return NextResponse.json(
       { success: false, error: String(error), playlists: [], totalRundowns: 0 },
-      { status: 500 }
+      { status: 500, headers: { 'Access-Control-Allow-Origin': '*' } }
     );
   }
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
 }

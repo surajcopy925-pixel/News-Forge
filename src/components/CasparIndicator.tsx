@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 
-export default function CasparIndicator() {
+export default function CasparIndicator({ rundownId }: { rundownId?: string | null }) {
   const [status, setStatus] = useState<'idle' | 'copying' | 'done' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const pathname = usePathname();

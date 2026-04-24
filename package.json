@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "dev:playout": "cd playout-server && npm run dev",
+    "dev:all": "concurrently \"npm run dev\" \"npm run dev:playout\"",
+    "build:playout": "cd playout-server && npm run build",
+    "start:playout": "cd playout-server && npm start"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.7.0",

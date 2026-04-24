@@ -4,7 +4,7 @@ import casparClient from '@/lib/caspar-client';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { clip, channel, layer } = body;
+    const { clip, channel, layer, loop } = body;
 
     if (!clip) {
       return NextResponse.json(
@@ -28,11 +28,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const result = await casparClient.play(ch, ly, clip);
+    let result;
+    if (loop) {
+      result = await casparClient.playLoop(ch, ly, clip);
+    } else {
+      result = await casparClient.play(ch, ly, clip);
+    }
 
     return NextResponse.json({
       success: result.code === 202,
-      command: `PLAY ${ch}-${ly} "${clip}"`,
+      command: `PLAY ${ch}-${ly} "${clip}"${loop ? ' LOOP' : ''}`,
       code: result.code,
       message: result.message,
     });

@@ -178,6 +178,15 @@ class CasparClient {
     return this.send(`PLAY ${channel}-${layer} "${clip}"`);
   }
 
+  async playLoop(channel: number, layer: number, clip: string): Promise<CasparResponse> {
+    return this.send(`PLAY ${channel}-${layer} "${clip}" LOOP`);
+  }
+
+  async next(channel: number, layer: number): Promise<CasparResponse> {
+    // Triggers the AUTO-loaded background clip to take foreground
+    return this.send(`PLAY ${channel}-${layer}`);
+  }
+
   async loadBg(channel: number, layer: number, clip: string, auto = false): Promise<CasparResponse> {
     const autoFlag = auto ? ' AUTO' : '';
     return this.send(`LOADBG ${channel}-${layer} "${clip}"${autoFlag}`);
@@ -206,6 +215,13 @@ class CasparClient {
 
   async cls(): Promise<CasparResponse> {
     return this.send('CLS');
+  }
+
+  async listMedia(): Promise<any[]> {
+    const res = await this.cls();
+    if (!res.data) return [];
+    // Basic parsing for the main app's legacy route
+    return res.data.split('\n').map(line => ({ name: line.replace(/^"|"$/g, '') }));
   }
 
   async version(): Promise<CasparResponse> {

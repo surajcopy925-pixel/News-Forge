@@ -5,12 +5,13 @@ import path from 'path';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const CASPAR_MEDIA_PATH = process.env.CASPAR_MEDIA_PATH || path.join(UPLOAD_ROOT, 'playout');
+const MEDIA_SERVER_PATH = process.env.MEDIA_SERVER_PATH || '';
 
 export const UPLOAD_DIRS = {
   raw: path.join(UPLOAD_ROOT, 'raw'),
   proxy: path.join(UPLOAD_ROOT, 'proxy'),
   thumbnails: path.join(UPLOAD_ROOT, 'thumbnails'),
-  playout: CASPAR_MEDIA_PATH,
+  playout: MEDIA_SERVER_PATH || CASPAR_MEDIA_PATH,
 } as const;
 
 export type UploadCategory = keyof typeof UPLOAD_DIRS;
